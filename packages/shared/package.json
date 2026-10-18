@@ -1,0 +1,9 @@
+{
+  "name": "@communityhub/shared",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "scripts": { "build": "tsc -b", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@supabase/supabase-js": "^2.49.1" }
+}

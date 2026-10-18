@@ -1,0 +1,12 @@
+node_modules
+.pnpm-store
+.env
+.env.*
+!.env.example
+.next
+.expo
+dist
+.tsbuild
+coverage
+supabase/.temp
+*.log

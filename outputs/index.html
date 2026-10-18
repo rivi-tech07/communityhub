@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nook — Your neighborhood, connected</title>
+  <style>
+    :root {
+      --ink: #183129;
+      --muted: #73817b;
+      --line: #e5ebe7;
+      --paper: #fbfdfa;
+      --mint: #dff3e8;
+      --green: #1d7958;
+      --lime: #d9ed68;
+      --peach: #fce5d1;
+      --lavender: #e8e1fa;
+      --yellow: #fff1bd;
+      --shadow: 0 12px 35px rgba(29, 73, 54, .08);
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    button, input { font: inherit; }
+    button { cursor: pointer; border: 0; }
+
+    .app-shell { display: flex; min-height: 100vh; }
+    .sidebar { width: 250px; border-right: 1px solid var(--line); padding: 26px 18px; display: flex; flex-direction: column; background: #fff; }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 0 11px 36px; font-weight: 800; font-size: 22px; letter-spacing: -.7px; }
+    .brand-mark { width: 31px; height: 31px; border-radius: 11px 11px 11px 3px; display: grid; place-items: center; background: var(--lime); transform: rotate(-8deg); font-size: 18px; }
+    .brand span { transform: translateY(-1px); }
+    .nav-label { text-transform: uppercase; font-size: 10px; letter-spacing: 1.6px; font-weight: 800; color: #a3afa8; padding: 0 12px 10px; }
+    .nav { display: grid; gap: 5px; }
+    .nav button { display: flex; align-items: center; gap: 13px; background: transparent; color: #61716a; padding: 12px; border-radius: 11px; text-align: left; font-size: 14px; font-weight: 600; transition: .2s ease; }
+    .nav button:hover, .nav button.active { background: var(--mint); color: var(--green); }
+    .nav .icon { width: 19px; text-align: center; font-size: 17px; }
+    .sidebar-bottom { margin-top: auto; }
+    .help-card { background: #f5f8f5; padding: 15px; border-radius: 16px; margin: 0 4px 22px; }
+    .help-card .small-leaf { font-size: 21px; margin-bottom: 8px; }
+    .help-card strong { font-size: 13px; display: block; margin-bottom: 4px; }
+    .help-card p { color: var(--muted); font-size: 11px; line-height: 1.5; margin: 0 0 12px; }
+    .help-card a { color: var(--green); font-size: 12px; text-decoration: none; font-weight: 700; }
+    .profile { display: flex; gap: 10px; align-items: center; padding: 12px 10px; border-top: 1px solid var(--line); }
+    .avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 12px; color: #216149; background: #cbe8d9; }
+    .profile strong { display: block; font-size: 12px; }
+    .profile span { font-size: 11px; color: var(--muted); }
+    .more { margin-left: auto; color: var(--muted); font-size: 18px; }
+
+    .main { flex: 1; min-width: 0; max-width: 1400px; margin: 0 auto; }
+    .topbar { height: 82px; padding: 0 42px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); }
+    .crumb { font-size: 12px; color: var(--muted); }
+    .crumb b { color: var(--ink); }
+    .top-actions { display: flex; align-items: center; gap: 15px; }
+    .location { color: var(--muted); font-size: 12px; }
+    .top-icon { position: relative; width: 35px; height: 35px; border-radius: 10px; background: #f4f7f4; color: var(--ink); display: grid; place-items: center; font-size: 17px; }
+    .dot { width: 6px; height: 6px; background: #e97658; border: 2px solid white; border-radius: 50%; position: absolute; top: 5px; right: 5px; }
+    .content { padding: 39px 42px 60px; }
+    .hero { display: flex; justify-content: space-between; gap: 24px; align-items: end; margin-bottom: 31px; }
+    h1 { font-size: clamp(29px, 3.3vw, 44px); letter-spacing: -2px; line-height: 1.05; margin: 0 0 11px; max-width: 610px; }
+    .hero p { color: var(--muted); margin: 0; font-size: 14px; }
+    .hero-actions { display: flex; gap: 9px; flex-wrap: wrap; justify-content: flex-end; }
+    .primary, .secondary { padding: 12px 16px; border-radius: 10px; font-size: 12px; font-weight: 800; transition: .2s ease; }
+    .primary { background: var(--green); color: white; box-shadow: 0 5px 12px rgba(29,121,88,.16); }
+    .primary:hover { background: #155d43; transform: translateY(-1px); }
+    .secondary { background: var(--mint); color: var(--green); }
+    .secondary:hover { background: #c8e7d7; }
+
+    .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; margin-bottom: 32px; }
+    .stat { border: 1px solid var(--line); border-radius: 14px; padding: 19px 20px; background: #fff; }
+    .stat-top { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 11px; font-weight: 600; }
+    .stat-icon { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-size: 13px; }
+    .stat:nth-child(1) .stat-icon { background: var(--mint); } .stat:nth-child(2) .stat-icon { background: var(--peach); } .stat:nth-child(3) .stat-icon { background: var(--lavender); } .stat:nth-child(4) .stat-icon { background: var(--yellow); }
+    .stat-value { font-size: 24px; letter-spacing: -1px; font-weight: 800; margin: 17px 0 4px; }
+    .stat-note { font-size: 10px; color: #6f9580; font-weight: 700; }
+
+    .section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+    .section-head h2 { font-size: 17px; letter-spacing: -.5px; margin: 0; }
+    .section-head a { color: var(--green); font-weight: 700; font-size: 11px; text-decoration: none; }
+    .quick-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; margin-bottom: 32px; }
+    .quick-card { min-height: 142px; border-radius: 16px; padding: 18px; position: relative; overflow: hidden; transition: .2s ease; }
+    .quick-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+    .quick-card:nth-child(1) { background: var(--mint); } .quick-card:nth-child(2) { background: var(--peach); } .quick-card:nth-child(3) { background: var(--lavender); } .quick-card:nth-child(4) { background: var(--yellow); }
+    .quick-card h3 { margin: 22px 0 5px; font-size: 14px; }
+    .quick-card p { margin: 0; font-size: 11px; color: #657871; max-width: 125px; line-height: 1.4; }
+    .card-icon { width: 29px; height: 29px; border-radius: 9px; display: grid; place-items: center; background: rgba(255,255,255,.57); font-size: 16px; }
+    .scribble { position: absolute; right: -5px; bottom: -13px; font-size: 74px; opacity: .15; transform: rotate(-15deg); }
+
+    .bottom-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, .95fr); gap: 28px; }
+    .panel { border: 1px solid var(--line); border-radius: 16px; background: #fff; overflow: hidden; }
+    .panel-header { padding: 18px 19px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+    .panel-header h2 { font-size: 16px; margin: 0; letter-spacing: -.4px; }
+    .panel-header span { font-size: 11px; color: var(--muted); }
+    .feed-item { display: flex; gap: 13px; padding: 17px 19px; border-bottom: 1px solid #edf0ed; }
+    .feed-item:last-child { border: 0; }
+    .feed-avatar { width: 37px; height: 37px; flex: 0 0 auto; border-radius: 11px; display: grid; place-items: center; font-size: 16px; }
+    .feed-item:nth-child(2) .feed-avatar { background: #d4eedc; } .feed-item:nth-child(3) .feed-avatar { background: #fbe2cf; } .feed-item:nth-child(4) .feed-avatar { background: #e7ddfa; }
+    .feed-copy { min-width: 0; flex: 1; }
+    .feed-copy strong { font-size: 12px; } .feed-copy p { font-size: 12px; line-height: 1.45; color: #66766e; margin: 5px 0; }
+    .feed-copy small { color: #a0aaa4; font-size: 10px; }
+    .feed-tag { align-self: start; border-radius: 6px; background: #f3f6f3; color: #718077; font-size: 9px; padding: 5px 7px; white-space: nowrap; font-weight: 700; }
+    .job-list { padding: 4px 19px 7px; }
+    .job { padding: 14px 0; border-bottom: 1px solid #edf0ed; display: flex; align-items: center; gap: 11px; }
+    .job:last-child { border: 0; }
+    .company-logo { width: 30px; height: 30px; border-radius: 8px; background: #f1f5f1; display: grid; place-items: center; font-weight: 900; color: var(--green); font-size: 12px; }
+    .job-main { flex: 1; min-width: 0; } .job-main strong { display: block; font-size: 12px; } .job-main span { color: var(--muted); font-size: 10px; }
+    .job-meta { color: #859189; font-size: 10px; text-align: right; } .job-meta b { display: block; color: var(--green); font-size: 11px; margin-bottom: 3px; }
+
+    .toast { position: fixed; right: 24px; bottom: 24px; background: var(--ink); color: white; border-radius: 12px; padding: 13px 17px; font-size: 12px; box-shadow: var(--shadow); transform: translateY(90px); opacity: 0; transition: .25s ease; pointer-events: none; }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    @media (max-width: 980px) { .sidebar { width: 76px; padding-left: 10px; padding-right: 10px; } .brand { padding-left: 10px; } .brand span, .nav-label, .nav button span:not(.icon), .help-card, .profile > div, .more { display: none; } .nav button { justify-content: center; } .profile { justify-content: center; } .topbar, .content { padding-left: 28px; padding-right: 28px; } }
+    @media (max-width: 760px) { .topbar { height: 68px; } .location { display: none; } .content { padding: 28px 18px 45px; } .hero { display: block; } .hero-actions { justify-content: flex-start; margin-top: 20px; } .stat-grid, .quick-grid { grid-template-columns: repeat(2, 1fr); } .bottom-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 470px) { .sidebar { display: none; } h1 { font-size: 31px; } .stat-grid { gap: 8px; } .stat { padding: 14px; } .stat-value { font-size: 20px; } .quick-grid { gap: 8px; } .quick-card { min-height: 130px; padding: 14px; } }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">✦</div><span>nook</span></div>
+      <div class="nav-label">Workspace</div>
+      <nav class="nav">
+        <button class="active" data-view="Overview"><span class="icon">⌂</span><span>Overview</span></button>
+        <button data-view="Groceries"><span class="icon">◌</span><span>Groceries</span></button>
+        <button data-view="Marketplace"><span class="icon">◒</span><span>Marketplace</span></button>
+        <button data-view="Jobs"><span class="icon">▦</span><span>Jobs board</span></button>
+        <button data-view="Business"><span class="icon">↗</span><span>Grow a business</span></button>
+      </nav>
+      <div class="nav-label" style="margin-top:30px">Your space</div>
+      <nav class="nav">
+        <button data-view="Saved"><span class="icon">♡</span><span>Saved items</span></button>
+        <button data-view="Messages"><span class="icon">◫</span><span>Messages</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="help-card"><div class="small-leaf">🌱</div><strong>Make your nook useful</strong><p>Share what you know, sell what you make, help a neighbor.</p><a href="#" data-toast="Thanks for helping your community!">View community guide →</a></div>
+        <div class="profile"><div class="avatar">AK</div><div><strong>Arjun Kumar</strong><span>Green Park, Delhi</span></div><div class="more">···</div></div>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div class="crumb">Workspace / <b id="crumbLabel">Overview</b></div><div class="top-actions"><span class="location">⌖ Green Park, Delhi</span><button class="top-icon" data-toast="Notifications are all caught up">♢<i class="dot"></i></button><button class="top-icon" data-toast="Search is ready">⌕</button></div></header>
+      <div class="content">
+        <section class="hero"><div><h1>Good morning, Arjun <span aria-hidden="true">✺</span></h1><p>Here’s what’s happening around your neighborhood today.</p></div><div class="hero-actions"><button class="secondary" data-toast="Opening your community feed…">+ Share an update</button><button class="primary" data-toast="Listing flow started — choose a category next">+ Create a listing</button></div></section>
+        <section class="stat-grid">
+          <div class="stat"><div class="stat-top">Local members <span class="stat-icon">♧</span></div><div class="stat-value">2,846</div><div class="stat-note">↑ 12% this month</div></div>
+          <div class="stat"><div class="stat-top">Items exchanged <span class="stat-icon">↔</span></div><div class="stat-value">1,204</div><div class="stat-note">↑ 18% this month</div></div>
+          <div class="stat"><div class="stat-top">Open opportunities <span class="stat-icon">⌁</span></div><div class="stat-value">38</div><div class="stat-note">8 new this week</div></div>
+          <div class="stat"><div class="stat-top">Local businesses <span class="stat-icon">✦</span></div><div class="stat-value">156</div><div class="stat-note">↑ 9% this month</div></div>
+        </section>
+        <section><div class="section-head"><h2>What do you need today?</h2><a href="#" data-toast="Showing all neighborhood categories">View all categories →</a></div><div class="quick-grid">
+          <button class="quick-card" data-toast="Groceries opened"><div class="card-icon">🛒</div><h3>Get groceries</h3><p>Fresh produce, pantry staples & more</p><div class="scribble">🥬</div></button>
+          <button class="quick-card" data-toast="Marketplace opened"><div class="card-icon">✧</div><h3>Shop local</h3><p>Unique finds from your neighbors</p><div class="scribble">🪴</div></button>
+          <button class="quick-card" data-toast="Jobs board opened"><div class="card-icon">⌁</div><h3>Find a job</h3><p>Opportunities close to home</p><div class="scribble">✎</div></button>
+          <button class="quick-card" data-toast="Business tools opened"><div class="card-icon">↗</div><h3>Grow your business</h3><p>Connect with local customers</p><div class="scribble">✺</div></button>
+        </div></section>
+        <div class="bottom-grid">
+          <section class="panel"><div class="panel-header"><h2>From your community</h2><span>Latest updates</span></div><div class="feed-item"><div class="feed-avatar">🥕</div><div class="feed-copy"><strong>Meera’s Farm Box</strong><p>Fresh seasonal vegetable boxes are ready for Saturday pickup. Limited boxes available!</p><small>12 min ago · Green Park</small></div><span class="feed-tag">Grocery</span></div><div class="feed-item"><div class="feed-avatar">☕</div><div class="feed-copy"><strong>Bean There Coffee</strong><p>We’re looking for a weekend barista. Know someone who’d be a great fit?</p><small>1 hr ago · Hauz Khas</small></div><span class="feed-tag">Hiring</span></div><div class="feed-item"><div class="feed-avatar">🪑</div><div class="feed-copy"><strong>Rohan S.</strong><p>Giving away a gently used study desk. First come, first served.</p><small>2 hrs ago · Malviya Nagar</small></div><span class="feed-tag">Free</span></div></section>
+          <section class="panel"><div class="panel-header"><h2>Jobs near you</h2><a href="#" data-toast="Showing all local jobs">See all →</a></div><div class="job-list"><div class="job"><div class="company-logo">B</div><div class="job-main"><strong>Weekend Barista</strong><span>Bean There Coffee · 1.2 km</span></div><div class="job-meta"><b>₹12–15k</b>Part-time</div></div><div class="job"><div class="company-logo">M</div><div class="job-main"><strong>Social Media Intern</strong><span>Mitti Studio · 2.8 km</span></div><div class="job-meta"><b>₹8–10k</b>Hybrid</div></div><div class="job"><div class="company-logo">P</div><div class="job-main"><strong>Delivery Partner</strong><span>LocalKart · 3.4 km</span></div><div class="job-meta"><b>₹18–24k</b>Full-time</div></div></div></section>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div class="toast" id="toast">Done</div>
+  <script>
+    const toast = document.getElementById('toast');
+    let toastTimer;
+    function showToast(message) { toast.textContent = message; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), 2500); }
+    document.querySelectorAll('[data-toast]').forEach(el => el.addEventListener('click', event => { if (el.tagName === 'A') event.preventDefault(); showToast(el.dataset.toast); }));
+    document.querySelectorAll('.nav button').forEach(button => button.addEventListener('click', () => { document.querySelector('.nav button.active').classList.remove('active'); button.classList.add('active'); document.getElementById('crumbLabel').textContent = button.dataset.view; showToast(button.dataset.view + ' selected'); }));
+  </script>
+</body>
+</html>

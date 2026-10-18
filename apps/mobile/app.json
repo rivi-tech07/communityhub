@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "CommunityHub",
+    "slug": "communityhub",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "communityhub",
+    "ios": {
+      "bundleIdentifier": "com.communityhub.app",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSUserTrackingUsageDescription": "CommunityHub does not track you across other companies' apps.",
+        "NSPhotoLibraryUsageDescription": "CommunityHub uses your photo library when you choose an image.",
+        "NSCameraUsageDescription": "CommunityHub uses your camera when you choose to take a photo.",
+        "UIBackgroundModes": ["remote-notification"]
+      }
+    },
+    "android": {
+      "package": "com.communityhub.app",
+      "permissions": ["CAMERA", "POST_NOTIFICATIONS", "READ_MEDIA_IMAGES"]
+    },
+    "plugins": ["expo-notifications"],
+    "notification": { "color": "#1D7958" },
+    "web": { "bundler": "metro" },
+    "extra": { "eas": { "projectId": "REPLACE_WITH_EAS_PROJECT_ID" } }
+  }
+}

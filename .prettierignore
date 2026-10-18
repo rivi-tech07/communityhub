@@ -1,0 +1,5 @@
+.env.example
+outputs/
+node_modules/
+.tsbuild/
+supabase/migrations/
