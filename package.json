@@ -18,6 +18,8 @@
     ,"release:check": "tsx scripts/release-check.ts"
   },
   "devDependencies": {
+    "@communityhub/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.49.1",
     "@types/node": "^22.10.2",
     "eslint": "^9.17.0",
     "prettier": "^3.4.2",

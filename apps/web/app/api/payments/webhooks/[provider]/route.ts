@@ -1,7 +1,20 @@
 import { NextResponse } from 'next/server';
 import { getAdminClient } from '../../../../lib/server-auth';
-import { verifyWebhook, type PaymentProvider } from '../../../../lib/payments';
+import { verifyWebhook } from '../../../../lib/payments';
+import type { PaymentProvider } from '@communityhub/shared';
 import { createHash } from 'node:crypto';
+
+type WebhookObject = {
+  [key: string]: unknown;
+  last_payment_error?: { code?: unknown; message?: unknown };
+};
+type WebhookEvent = {
+  id?: unknown;
+  event?: unknown;
+  type?: unknown;
+  data?: { object?: WebhookObject };
+  payload?: { payment?: { entity?: WebhookObject }; refund?: { entity?: WebhookObject } };
+};
 
 export const runtime = 'nodejs';
 export async function POST(
@@ -16,7 +29,7 @@ export async function POST(
     request.headers.get(provider === 'stripe' ? 'stripe-signature' : 'x-razorpay-signature') ?? '';
   if (!verifyWebhook(provider, payload, signature))
     return NextResponse.json({ error: 'Webhook signature is invalid.' }, { status: 400 });
-  const event = JSON.parse(payload) as Record<string, any>;
+  const event = JSON.parse(payload) as WebhookEvent;
   const type = String(event.type ?? '');
   const object =
     event.data?.object ?? event.payload?.payment?.entity ?? event.payload?.refund?.entity ?? {};

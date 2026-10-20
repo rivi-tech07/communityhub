@@ -4,4 +4,4 @@
 
 Promotions are not active until payment and required approval are verified. A refund cancels the associated entitlement where possible. Provider disputes, chargebacks, duplicate payments, failed payments, and webhook delays are reconciled against the transaction ledger.
 
-Support: **REPLACE_WITH_SUPPORT_EMAIL**. Final consumer-rights wording and UK/India tax treatment require legal approval.
+For UK customers, the final policy must state the trader of record, category-specific cancellation rights, statutory remedies, food/accommodation/service exceptions where applicable, delivery failure handling, chargebacks, and tax/receipt treatment. Support: **REPLACE_WITH_SUPPORT_EMAIL**. UK/India tax treatment requires accountant approval.

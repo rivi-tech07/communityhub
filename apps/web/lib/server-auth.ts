@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 function getConfig() {
   const config = getSupabaseConfig({
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   });
   if (!config) throw new Error('Supabase public environment variables are not configured.');
@@ -36,6 +37,9 @@ export async function authenticate(
     const { data, error } = await client.auth.getUser(token);
     if (error || !data.user)
       return NextResponse.json({ error: 'Session is invalid or expired.' }, { status: 401 });
+    const { data: restricted, error: restrictionError } = await client.rpc('is_user_restricted', { target_user: data.user.id });
+    if (restrictionError) return NextResponse.json({ error: 'Unable to verify account status.' }, { status: 503 });
+    if (restricted) return NextResponse.json({ error: 'This account is restricted. Contact support if you believe this is an error.' }, { status: 403 });
     return { user: data.user, client };
   } catch {
     return NextResponse.json({ error: 'Authentication service is unavailable.' }, { status: 503 });

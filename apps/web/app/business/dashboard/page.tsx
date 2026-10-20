@@ -22,6 +22,7 @@ type Product = {
 };
 const config = getSupabaseConfig({
   NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
 });
 const supabase = config ? createSupabaseClient(config) : null;
@@ -114,7 +115,12 @@ export default function BusinessDashboard() {
     void load();
   }, []);
   return (
-    <main className="dashboard-page">
+    <main className="business-dashboard-shell">
+      <header className="community-web-header">
+        <a href="/" className="community-web-brand"><span className="brand-mark">✦</span>Community<span>Hub</span></a>
+        <nav className="community-web-actions"><a href="/">Home</a><a href="/businesses">Directory</a><a href="/jobs">Jobs</a><a href="/login" className="web-sign-in">Account</a></nav>
+      </header>
+      <section className="dashboard-page">
       <header className="directory-header">
         <div>
           <p className="eyebrow">COMMUNITYHUB / BUSINESS</p>
@@ -230,6 +236,7 @@ export default function BusinessDashboard() {
         </section>
       </section>
       {message && <p className="status">{message}</p>}
+      </section>
     </main>
   );
 }

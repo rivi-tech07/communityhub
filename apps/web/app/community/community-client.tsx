@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createSupabaseClient, getSupabaseConfig, type Database } from '@communityhub/shared';
 
-const config = getSupabaseConfig({ NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY });
+const config = getSupabaseConfig({ NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY });
 const supabase = config ? createSupabaseClient(config) : null;
 type Community = Database['public']['Tables']['communities']['Row'];
 type Post = Database['public']['Tables']['posts']['Row'];

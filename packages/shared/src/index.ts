@@ -243,6 +243,26 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      user_safety_controls: {
+        Row: {
+          user_id: string;
+          status: 'active' | 'blocked' | 'blacklisted';
+          reason: string;
+          expires_at: string | null;
+          created_by: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          status?: 'active' | 'blocked' | 'blacklisted';
+          reason: string;
+          expires_at?: string | null;
+          created_by: string;
+        };
+        Update: Partial<Database['public']['Tables']['user_safety_controls']['Row']>;
+        Relationships: [];
+      };
       moderation_audit_log: {
         Row: {
           id: string;
@@ -894,7 +914,9 @@ export type Database = {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      is_user_restricted: { Args: { target_user: string }; Returns: boolean };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
@@ -904,7 +926,7 @@ export type SupabaseConfig = { url: string; anonKey: string };
 
 export function getSupabaseConfig(env: Record<string, string | undefined>): SupabaseConfig | null {
   const url = env.NEXT_PUBLIC_SUPABASE_URL ?? env.EXPO_PUBLIC_SUPABASE_URL;
-  const anonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+  const anonKey = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
   return url && anonKey ? { url, anonKey } : null;
 }
 
