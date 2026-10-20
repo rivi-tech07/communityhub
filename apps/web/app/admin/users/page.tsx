@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { supabase } from '../../../lib/supabase';
 
 type Control = { user_id: string; status: 'active' | 'blocked' | 'blacklisted'; reason: string; expires_at: string | null; updated_at: string };
 
-export default function AdminUsersPage() {
+export default function AdminUsersPage(): ReactElement {
   const [controls, setControls] = useState<Control[]>([]);
   const [userId, setUserId] = useState('');
   const [status, setStatus] = useState<Control['status']>('blocked');
