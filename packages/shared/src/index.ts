@@ -6,7 +6,7 @@ export const AUTH_POLICY = {
   recoveryExpirySeconds: 3600,
 } as const;
 
-export const ROLES = ['user', 'moderator', 'business_owner', 'employer', 'administrator'] as const;
+export const ROLES = ['user', 'moderator', 'business_owner', 'employer', 'administrator', 'rider'] as const;
 export type Role = (typeof ROLES)[number];
 export type PrivacySettings = {
   profile_visible: boolean;
@@ -926,6 +926,40 @@ export type Database = {
             'approval_status' | 'entitlement_status' | 'transaction_id' | 'starts_at' | 'expires_at'
           >
         >;
+        Relationships: [];
+      };
+      delivery_runs: {
+        Row: {
+          id: string;
+          customer_id: string;
+          rider_id: string | null;
+          status: 'pending' | 'assigned' | 'collecting' | 'out_for_delivery' | 'delivered' | 'cancelled';
+          delivery_address: Record<string, unknown>;
+          assigned_at: string | null;
+          delivered_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['delivery_runs']['Row'], 'id' | 'created_at' | 'updated_at'> & { customer_id: string; delivery_address: Record<string, unknown> };
+        Update: Partial<Pick<Database['public']['Tables']['delivery_runs']['Row'], 'rider_id' | 'status' | 'delivery_address' | 'assigned_at' | 'delivered_at'>>;
+        Relationships: [];
+      };
+      delivery_run_stops: {
+        Row: { id: string; run_id: string; business_id: string; order_id: string; stop_order: number; status: 'pending' | 'arrived' | 'picked_up' | 'cancelled'; picked_up_at: string | null };
+        Insert: Omit<Database['public']['Tables']['delivery_run_stops']['Row'], 'id'>;
+        Update: Partial<Pick<Database['public']['Tables']['delivery_run_stops']['Row'], 'status' | 'picked_up_at'>>;
+        Relationships: [];
+      };
+      delivery_proofs: {
+        Row: { id: string; run_id: string; stop_id: string | null; captured_by: string; proof_type: 'pickup_selfie' | 'pickup_items' | 'delivery_selfie'; storage_path: string; latitude: number | null; longitude: number | null; captured_at: string };
+        Insert: Omit<Database['public']['Tables']['delivery_proofs']['Row'], 'id' | 'captured_at'>;
+        Update: never;
+        Relationships: [];
+      };
+      feature_flags: {
+        Row: { key: string; enabled: boolean; description: string; updated_by: string | null; updated_at: string };
+        Insert: Omit<Database['public']['Tables']['feature_flags']['Row'], 'updated_at'>;
+        Update: Partial<Pick<Database['public']['Tables']['feature_flags']['Row'], 'enabled' | 'description' | 'updated_by'>>;
         Relationships: [];
       };
     };

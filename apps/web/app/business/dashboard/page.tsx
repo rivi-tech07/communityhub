@@ -20,6 +20,13 @@ type Product = {
   stock_quantity: number;
   availability: boolean;
 };
+type BusinessReport = {
+  todaySales: number;
+  completedOrders: number;
+  totalOrders: number;
+  products: Product[];
+  recentOrders: Array<{ id: string; total: number; status: string; created_at: string }>;
+};
 const config = getSupabaseConfig({
   NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
@@ -30,6 +37,7 @@ export default function BusinessDashboard() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [selected, setSelected] = useState<Business | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
+  const [report, setReport] = useState<BusinessReport | null>(null);
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [category, setCategory] = useState('');
@@ -66,6 +74,8 @@ export default function BusinessDashboard() {
     try {
       const payload = await call(`/api/products?businessId=${business.id}`);
       setProducts(payload.products ?? []);
+      const reportPayload = await call(`/api/businesses/${business.id}/reports`);
+      setReport(reportPayload.report ?? null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to load products.');
     }
@@ -186,6 +196,26 @@ export default function BusinessDashboard() {
                 </div>
                 <a href={`/businesses/${selected.id}`}>Public page →</a>
               </div>
+              {report && (
+                <section className="business-report" aria-label="Shop reports">
+                  <div className="business-report-heading">
+                    <div><h3>Shop report</h3><p className="muted">Only data from {selected.name}</p></div>
+                    <span className="report-period">Current totals</span>
+                  </div>
+                  <div className="business-report-metrics">
+                    <div><small>Sales</small><strong>GBP {report.todaySales.toFixed(2)}</strong></div>
+                    <div><small>Completed orders</small><strong>{report.completedOrders}</strong></div>
+                    <div><small>Products</small><strong>{report.products.length}</strong></div>
+                    <div><small>Low stock</small><strong>{report.products.filter((product) => product.stock_quantity <= 5).length}</strong></div>
+                  </div>
+                  <div className="business-report-stock">
+                    <strong>Stock to manage</strong>
+                    {report.products.slice(0, 6).map((product) => (
+                      <div key={product.id}><span>{product.name}</span><span className={product.stock_quantity <= 5 ? 'low-stock' : ''}>{product.stock_quantity} in stock</span></div>
+                    ))}
+                  </div>
+                </section>
+              )}
               <h3>Products</h3>
               {products.map((product) => (
                 <div className="product-row" key={product.id}>

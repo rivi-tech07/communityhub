@@ -12,20 +12,36 @@ type Business = {
   country: string | null;
   is_sample: boolean;
 };
+type Product = {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  currency: string;
+  unit: string;
+  stock_quantity: number;
+  businesses?: { id: string; name: string; city: string | null; country: string | null } | null;
+  delivery_configs?: { estimated_min_minutes: number; estimated_max_minutes: number } | null;
+};
 export default function BusinessesPage() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState('');
   const [message, setMessage] = useState('Loading directory…');
   async function load() {
-    const response = await fetch(
-      `/api/businesses${query ? `?q=${encodeURIComponent(query)}` : ''}`,
-    );
-    const payload = await response.json();
-    if (!response.ok) {
-      setMessage(payload.error ?? 'Unable to load directory.');
+    const suffix = query ? `?q=${encodeURIComponent(query)}` : '';
+    const [businessResponse, productResponse] = await Promise.all([
+      fetch(`/api/businesses${suffix}`),
+      fetch(`/api/products${suffix}`),
+    ]);
+    const businessPayload = await businessResponse.json();
+    const productPayload = await productResponse.json();
+    if (!businessResponse.ok || !productResponse.ok) {
+      setMessage(businessPayload.error ?? productPayload.error ?? 'Unable to load shop.');
       return;
     }
-    setBusinesses(payload.businesses ?? []);
+    setBusinesses(businessPayload.businesses ?? []);
+    setProducts(productPayload.products ?? []);
     setMessage('');
   }
   useEffect(() => {
@@ -51,7 +67,7 @@ export default function BusinessesPage() {
           onKeyDown={(event) => {
             if (event.key === 'Enter') void load();
           }}
-          placeholder="Search businesses"
+          placeholder="Search items or shops"
         />
         <button className="primary-action" onClick={() => void load()}>
           Search
@@ -69,10 +85,11 @@ export default function BusinessesPage() {
           </a>
         ))}
       </section>
-      {!message && !businesses.length && (
+      {products.length > 0 && <section className="shop-results"><div className="directory-section-heading"><div><p className="eyebrow">ITEMS NEARBY</p><h2>{query ? `Results for “${query}”` : 'Popular items'}</h2></div><span className="muted">Delivery times are set by each shop</span></div><div className="product-grid">{products.map((product) => { const delivery = product.delivery_configs; return <article className="product-card shop-product-card" key={product.id}><span className="product-unit">{product.unit}</span><h3>{product.name}</h3><p>{product.description ?? 'Available from a verified local shop.'}</p><strong>{product.currency} {Number(product.price).toFixed(2)}</strong><small>{product.businesses?.name ?? 'Local shop'} · {product.businesses?.city ?? product.businesses?.country ?? 'Nearby'}</small>{delivery && <span className="delivery-estimate">{delivery.estimated_min_minutes}–{delivery.estimated_max_minutes} min delivery</span>}<a className="secondary-action" href={product.businesses ? `/businesses/${product.businesses.id}` : '/businesses'}>View shop</a></article>; })}</div></section>}
+      {!message && !businesses.length && !products.length && (
         <div className="empty-state">
-          <strong>No verified businesses found</strong>
-          <p>Try a different search.</p>
+          <strong>No verified shops or items found</strong>
+          <p>Try a different item or shop name.</p>
         </div>
       )}
     </main>

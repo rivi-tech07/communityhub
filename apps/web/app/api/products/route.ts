@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const client = getPublicClient();
   let builder = client
     .from('products')
-    .select('*')
+    .select('*, businesses(id, name, city, country), delivery_configs(estimated_min_minutes, estimated_max_minutes)')
     .order('created_at', { ascending: false })
     .limit(limit + 1);
   if (params.get('businessId')) builder = builder.eq('business_id', params.get('businessId')!);
