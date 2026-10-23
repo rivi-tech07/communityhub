@@ -1,9 +1,20 @@
 import { NextResponse } from 'next/server';
-import { authenticate, getPublicClient } from '../../../lib/server-auth';
+import { authenticate, getPublicClient, getUserClient } from '../../../lib/server-auth';
 
 export async function GET(request: Request, context: { params: Promise<{ businessId: string }> }) {
   const { businessId } = await context.params;
-  const client = getPublicClient();
+  let client = getPublicClient();
+  const authorization = request.headers.get('authorization');
+  const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+  if (token) {
+    try {
+      const userClient = getUserClient(token);
+      const { data } = await userClient.auth.getUser(token);
+      if (data.user) client = userClient;
+    } catch {
+      // Invalid optional credentials fall back to the public policy.
+    }
+  }
   const { data, error } = await client.from('businesses').select('*').eq('id', businessId).single();
   if (error) return NextResponse.json({ error: 'Business not found.' }, { status: 404 });
   return NextResponse.json({ business: data });

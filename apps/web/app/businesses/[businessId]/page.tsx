@@ -1,6 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { createSupabaseClient, getSupabaseConfig } from '@communityhub/shared';
+
+const config = getSupabaseConfig({
+  NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+});
+const supabase = config ? createSupabaseClient(config) : null;
 type Business = {
   id: string;
   name: string;
@@ -28,9 +36,12 @@ export default function BusinessPage({ params }: { params: Promise<{ businessId:
   const [message, setMessage] = useState('Loading business…');
   useEffect(() => {
     void params.then(async ({ businessId }) => {
+      const session = await supabase?.auth.getSession();
+      const token = session?.data.session?.access_token;
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       const [businessResponse, productResponse] = await Promise.all([
-        fetch(`/api/businesses/${businessId}`, { cache: 'no-store' }),
-        fetch(`/api/products?businessId=${businessId}`, { cache: 'no-store' }),
+        fetch(`/api/businesses/${businessId}`, { cache: 'no-store', headers }),
+        fetch(`/api/products?businessId=${businessId}`, { cache: 'no-store', headers }),
       ]);
       const businessPayload = await businessResponse.json();
       const productPayload = await productResponse.json();

@@ -1,11 +1,22 @@
 import { NextResponse } from 'next/server';
-import { authenticate, getPublicClient } from '../../lib/server-auth';
+import { authenticate, getPublicClient, getUserClient } from '../../lib/server-auth';
 import { pageParams } from '../../lib/pagination';
 
 export async function GET(request: Request) {
   const { limit, cursor, query } = pageParams(request.url);
   const params = new URL(request.url).searchParams;
-  const client = getPublicClient();
+  let client = getPublicClient();
+  const authorization = request.headers.get('authorization');
+  const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+  if (token) {
+    try {
+      const userClient = getUserClient(token);
+      const { data: userData } = await userClient.auth.getUser(token);
+      if (userData.user) client = userClient;
+    } catch {
+      // Invalid optional credentials fall back to the public policy.
+    }
+  }
   let builder = client
     .from('products')
     .select('*, businesses(id, name, city, country), delivery_configs(estimated_min_minutes, estimated_max_minutes), product_images(storage_path, sort_order)')
