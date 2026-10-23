@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { createSupabaseClient, getCooldownRemaining, getSupabaseConfig } from '@communityhub/shared';
+import { createBrowserClient } from '@supabase/ssr';
+import { getCooldownRemaining, getSupabaseConfig, type Database } from '@communityhub/shared';
 
 type Mode = 'email' | 'phone';
 type Registration = {
@@ -18,7 +19,7 @@ const config = getSupabaseConfig({
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
 });
-const supabase = config ? createSupabaseClient(config) : null;
+const supabase = config ? createBrowserClient<Database>(config.url, config.anonKey) : null;
 
 const emptyRegistration: Registration = {
   fullName: '',
