@@ -10,7 +10,7 @@ const createdUsers: string[] = [];
 
 describeIntegration('Supabase authentication integration', () => {
   const admin = integration ? createClient(url!, serviceRoleKey!, { auth: { persistSession: false, autoRefreshToken: false } }) : null;
-  const uniqueEmail = () => `phase2-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`;
+  const uniqueEmail = () => `phase2-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
 
   afterEach(async () => { if (admin) await Promise.all(createdUsers.splice(0).map((userId) => admin.auth.admin.deleteUser(userId))); });
 

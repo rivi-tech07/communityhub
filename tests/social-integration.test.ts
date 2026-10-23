@@ -7,6 +7,7 @@ const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const integration = Boolean(url && anonKey && serviceRoleKey);
 const describeIntegration = url && anonKey && serviceRoleKey ? describe : describe.skip;
 const userIds: string[] = [];
+const integrationTimeout = 15000;
 
 describeIntegration('CommunityHub social access', () => {
   const admin = integration ? createClient(url!, serviceRoleKey!, { auth: { persistSession: false, autoRefreshToken: false } }) : null;
@@ -14,7 +15,7 @@ describeIntegration('CommunityHub social access', () => {
   const password = 'phase-three-test-password';
 
   async function createTestUser(label: string) {
-    const email = `phase3-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`;
+    const email = `phase3-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const { data, error } = await admin!.auth.admin.createUser({ email, password, email_confirm: true });
     if (error || !data.user) throw error ?? new Error('Test user was not created.');
     userIds.push(data.user.id);
@@ -26,7 +27,7 @@ describeIntegration('CommunityHub social access', () => {
 
   afterEach(async () => { if (admin) await Promise.all(userIds.splice(0).map((id) => admin.auth.admin.deleteUser(id))); });
 
-  it('enforces public/private membership, posting, moderation, and reporting', async () => {
+  it('enforces public/private membership, posting, moderation, and reporting', { timeout: integrationTimeout }, async () => {
     const ownerAccount = await createTestUser('owner'); const memberAccount = await createTestUser('member'); const outsiderAccount = await createTestUser('outsider'); const moderatorAccount = await createTestUser('moderator');
     owner = ownerAccount.client; member = memberAccount.client; outsider = outsiderAccount.client; moderator = moderatorAccount.client;
     await admin!.from('user_roles').insert({ user_id: moderatorAccount.id, role: 'moderator' });

@@ -241,7 +241,7 @@ create policy "Authorized moderators can write audit logs" on public.moderation_
 insert into storage.buckets (id, name, public) values ('community-media', 'community-media', false) on conflict (id) do update set public = false;
 create policy "Members can read private community media" on storage.objects for select to authenticated using (bucket_id = 'community-media' and public.can_view_community((split_part(name, '/', 1))::uuid));
 create policy "Post authors can upload media" on storage.objects for insert to authenticated with check (bucket_id = 'community-media' and exists (select 1 from public.posts where id = (split_part(name, '/', 2))::uuid and author_id = auth.uid()));
-create policy "Uploaders can remove media" on storage.objects for delete to authenticated using (bucket_id = 'community-media' and owner_id = auth.uid());
+create policy "Uploaders can remove media" on storage.objects for delete to authenticated using (bucket_id = 'community-media' and owner_id = auth.uid()::text);
 
 create index if not exists communities_type_visibility_idx on public.communities (community_type, visibility, created_at desc);
 create index if not exists communities_name_trgm_idx on public.communities using gin (name gin_trgm_ops);

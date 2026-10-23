@@ -1,47 +1,74 @@
-import { supabaseConfig } from '../lib/supabase';
+'use client';
 
-const stories = [
-  ['+', 'Your story', 'story-new'],
-  ['👩🏽', 'Neighbors', 'story-photo'],
-  ['🥬', 'Food', 'story-food'],
-  ['🧰', 'Jobs', 'story-jobs'],
-  ['🏪', 'Marketplace', 'story-store'],
-  ['👨‍👩‍👧', 'Community', 'story-family'],
-];
+import { useEffect, useState, type ReactNode } from 'react';
 
-const jobs = [
-  ['Cafe team member', 'Riverside · Part-time', 'Apply'],
-  ['Delivery driver', 'Westside · Full-time', 'Apply'],
-  ['Store assistant', 'Lakeside · Part-time', 'Apply'],
-];
+type Job = { id: string; title: string; location: string | null; job_type: string; salary_currency: string };
+type Business = { id: string; name: string; category: string; city: string | null; country: string | null; is_sample: boolean };
+type Service = { id: string; name: string; category: string; pricing: string | null; service_areas: string[]; is_sample: boolean };
+type Event = { id: string; title: string; starts_at: string; venue_name: string | null; online_url: string | null; is_sample: boolean };
+type Community = { id: string; name: string; community_type: string; visibility: string; city: string | null; is_sample: boolean };
+type DashboardData = { jobs: Job[]; businesses: Business[]; services: Service[]; events: Event[]; communities: Community[] };
 
-const products = [
-  ['🍅', 'Fresh tomatoes', '$2.99'],
-  ['🍌', 'Bananas', '$1.49'],
-  ['🥬', 'Lettuce', '$1.99'],
-];
+const emptyData: DashboardData = { jobs: [], businesses: [], services: [], events: [], communities: [] };
+
+async function loadList<T>(url: string, key: keyof DashboardData): Promise<T[]> {
+  const response = await fetch(url, { cache: 'no-store' });
+  const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!response.ok) throw new Error(typeof payload?.error === 'string' ? payload.error : `Unable to load ${key}.`);
+  return Array.isArray(payload?.[key]) ? payload[key] as T[] : [];
+}
 
 export default function DashboardPage() {
+  const [data, setData] = useState<DashboardData>(emptyData);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+
+  async function loadDashboard(search = '') {
+    setLoading(true);
+    setError('');
+    try {
+      const suffix = search ? `?query=${encodeURIComponent(search)}` : '';
+      const [jobs, businesses, services, events, communities] = await Promise.all([
+        loadList<Job>(`/api/jobs${suffix}`, 'jobs'),
+        loadList<Business>(`/api/businesses${suffix}`, 'businesses'),
+        loadList<Service>(`/api/services${suffix}`, 'services'),
+        loadList<Event>(`/api/events${suffix}`, 'events'),
+        loadList<Community>(`/api/communities?public=true${search ? `&query=${encodeURIComponent(search)}` : ''}`, 'communities').catch(() => []),
+      ]);
+      setData({ jobs, businesses, services, events, communities });
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load CommunityHub.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void loadDashboard(); }, []);
+
   return (
     <main className="community-web-shell">
-      <header className="community-web-header">
-        <a href="/" className="community-web-brand"><span className="brand-mark">✦</span>Community<span>Hub</span></a>
-        <nav className="community-web-actions">
-          <a href="/community">Communities</a><a href="/jobs">Jobs</a><a href="/businesses">Shop</a><a href="/login" className="web-sign-in">Sign in</a>
-        </nav>
-      </header>
+      <header className="community-web-header"><a href="/" className="community-web-brand"><span className="brand-mark">✦</span>Community<span>Hub</span></a><nav className="community-web-actions"><a href="/community">Communities</a><a href="/jobs">Jobs</a><a href="/businesses">Shop</a><a href="/login" className="web-sign-in">Sign in</a></nav></header>
       <section className="community-web-content">
-        <div className="community-welcome"><div><p className="eyebrow">COMMUNITYHUB / HOME</p><h1>Good morning, discover your community.</h1><p className="muted">Connect with neighbours, find local opportunities, and support independent stores.</p></div><div className="web-status"><span />{supabaseConfig ? 'Connected' : 'Development preview'}</div></div>
-        <div className="web-stories">{stories.map(([icon, label, tone]) => <a href={label === 'Jobs' ? '/jobs' : label === 'Marketplace' ? '/businesses' : '/community'} className="web-story" key={label}><div className={`web-story-circle ${tone}`}>{icon}</div><span>{label}</span></a>)}</div>
-        <div className="web-feed-layout">
-          <section className="web-feed-column">
-            <article className="web-post-card"><div className="web-post-author"><div className="web-avatar">AM</div><div><strong>Arjun Mehta</strong><small>Riverside · 2h ago</small></div><b>•••</b></div><p className="web-post-copy">Beautiful morning in our community park! Grateful for these amazing people 🧡</p><img className="web-post-image" src="https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=1000&q=85" alt="Friends enjoying a community park" /><small className="web-sample-tag">SAMPLE POST</small><div className="web-post-actions"><span className="liked">♥ 128</span><span>◯ 24</span><span>↗ Share</span><span>♡ Save</span></div></article>
-            <article className="web-reel-card"><div className="web-reel-image"><img src="https://images.unsplash.com/photo-1543353071-10c8ba85a904?w=1000&q=85" alt="Healthy meal preparation" /><span className="web-play">▶</span><small>0:28</small></div><h2>Quick & healthy meal for busy days 🌿</h2><div className="web-post-actions"><span className="liked">♥ 342</span><span>◯ 56</span><span>↗ Share</span></div></article>
-          </section>
-          <aside className="web-side-column"><section className="web-feature-panel jobs-feature"><div className="web-panel-heading"><h2>Local jobs</h2><a href="/jobs">View all ›</a></div>{jobs.map(([title, meta, action]) => <div className="web-job-row" key={title}><div className="web-job-icon">▣</div><div><strong>{title}</strong><small>⌖ {meta}</small></div><button>{action}</button></div>)}</section><section className="web-feature-panel groceries-feature"><div className="web-panel-heading"><h2>Fresh groceries</h2><a href="/businesses">View all ›</a></div><img className="web-grocery-image" src="https://images.unsplash.com/photo-1610348725531-843dff563e2c?w=800&q=85" alt="Fresh vegetables" /><strong className="web-store-name">Green Valley Store</strong><small className="web-store-meta">Riverside · 1.2 km · Open today</small><div className="web-product-grid">{products.map(([emoji, name, price]) => <div className="web-product" key={name}><span>{emoji}</span><strong>{name}</strong><b>{price}</b><button>Add</button></div>)}</div></section></aside>
-        </div>
+        <div className="community-welcome"><div><p className="eyebrow">COMMUNITYHUB / DISCOVER</p><h1>Find people, opportunities and local places.</h1><p className="muted">Search verified listings and public communities. Sign in to see your private feed.</p></div><span className="web-status"><span />Live directory</span></div>
+        <form className="home-search" onSubmit={(event) => { event.preventDefault(); void loadDashboard(query.trim()); }}><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search jobs, businesses, services, events or communities" aria-label="Search CommunityHub" /><button className="primary-action" type="submit">Search</button></form>
+        <div className="home-quick-actions"><a href="/community">Explore communities</a><a href="/jobs">Find a job</a><a href="/services">Find a service</a><a href="/events">Discover events</a></div>
+        {error && <div className="error-state"><strong>We could not load the directory.</strong><p>{error}</p><button className="secondary-action" type="button" onClick={() => void loadDashboard(query.trim())}>Try again</button></div>}
+        {loading ? <div className="loading-state">Loading local listings…</div> : <>
+          <LiveSection title="Public communities" href="/community" empty="No public communities are available yet.">{data.communities.map((community) => <a className="live-card" href={`/community?community=${community.id}`} key={community.id}><span className="live-card-label">{community.community_type}</span><strong>{community.name}</strong><small>{community.city ?? 'UK-wide'} · {community.visibility}</small>{community.is_sample && <em>Sample</em>}</a>)}</LiveSection>
+          <LiveSection title="Jobs near you" href="/jobs" empty="No published jobs match your search.">{data.jobs.map((job) => <a className="live-card" href={`/jobs?job=${job.id}`} key={job.id}><span className="live-card-label">{job.job_type.replaceAll('_', ' ')}</span><strong>{job.title}</strong><small>{job.location ?? 'Location not supplied'} · {job.salary_currency}</small></a>)}</LiveSection>
+          <LiveSection title="Local businesses" href="/businesses" empty="No verified businesses are available yet.">{data.businesses.map((business) => <a className="live-card" href={`/businesses/${business.id}`} key={business.id}><span className="live-card-label">{business.category}</span><strong>{business.name}</strong><small>{business.city ?? business.country ?? 'Location not supplied'}</small>{business.is_sample && <em>Sample</em>}</a>)}</LiveSection>
+          <LiveSection title="Services" href="/services" empty="No published services match your search.">{data.services.map((service) => <a className="live-card" href={`/services?service=${service.id}`} key={service.id}><span className="live-card-label">{service.category}</span><strong>{service.name}</strong><small>{service.pricing ?? 'Pricing supplied by provider'} · {service.service_areas.join(', ') || 'Local area'}</small>{service.is_sample && <em>Sample</em>}</a>)}</LiveSection>
+          <LiveSection title="Upcoming events" href="/events" empty="No upcoming events are published yet.">{data.events.map((event) => <a className="live-card" href={`/events?event=${event.id}`} key={event.id}><span className="live-card-label">{new Date(event.starts_at).toLocaleDateString('en-GB')}</span><strong>{event.title}</strong><small>{event.online_url ? 'Online event' : event.venue_name ?? 'Venue to be announced'}</small>{event.is_sample && <em>Sample</em>}</a>)}</LiveSection>
+          <section className="home-private-feed"><div><h2>Your community feed</h2><p>Posts, photos, videos, comments and saved content are available after sign-in and membership checks.</p></div><a className="primary-action" href="/login">Sign in to view feed</a></section>
+        </>}
       </section>
-      <nav className="web-bottom-nav"><a className="selected" href="/">⌂<span>Home</span></a><a href="/community">＋<span>Post</span></a><a href="/jobs">▣<span>Jobs</span></a><a href="/businesses">🛒<span>Shop</span></a><a href="/profile">○<span>Profile</span></a></nav>
+      <nav className="web-bottom-nav"><a className="selected" href="/">⌂<span>Home</span></a><a href="/community">＋<span>Community</span></a><a href="/jobs">▣<span>Jobs</span></a><a href="/businesses">🛒<span>Shop</span></a><a href="/profile">○<span>Profile</span></a></nav>
     </main>
   );
+}
+
+function LiveSection({ title, href, empty, children }: { title: string; href: string; empty: string; children: ReactNode }) {
+  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
+  return <section className="live-section"><div className="live-section-heading"><h2>{title}</h2><a href={href}>View all ›</a></div>{hasChildren ? <div className="live-grid">{children}</div> : <div className="empty-state"><p>{empty}</p></div>}</section>;
 }

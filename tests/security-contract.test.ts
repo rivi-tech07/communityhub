@@ -31,4 +31,17 @@ describe('release security contracts', () => {
     ])
       expect(existsSync(resolve(root, file))).toBe(true);
   });
+  it('keeps public social browsing separate from protected social actions', () => {
+    const sql = readFileSync(resolve(root, 'supabase/migrations/202610230001_public_social_browse.sql'), 'utf8');
+    expect(sql).toContain('Anyone can browse public communities');
+    expect(sql).toContain('Anyone can browse public posts');
+    expect(sql).toContain('Authors and moderators can delete posts');
+    expect(sql).toContain('Comment authors and moderators can delete comments');
+  });
+  it('keeps jobs, CVs, applications, and saved jobs access-controlled', () => {
+    const sql = readFileSync(resolve(root, 'supabase/migrations/202610230002_jobs_applications.sql'), 'utf8');
+    expect(sql).toContain('create table if not exists public.saved_jobs');
+    expect(sql).toContain('Users save public jobs');
+    expect(readFileSync(resolve(root, 'supabase/migrations/202610180005_jobs_services_events.sql'), 'utf8')).toContain('Users manage own CVs');
+  });
 });

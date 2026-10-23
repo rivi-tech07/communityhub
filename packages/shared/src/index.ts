@@ -565,6 +565,7 @@ export type Database = {
           salary_currency: string;
           location: string | null;
           is_remote: boolean;
+          workplace_type: 'remote' | 'hybrid' | 'on_site';
           application_deadline: string | null;
           sponsorship_status: SponsorshipStatus;
           sponsorship_source: string | null;
@@ -584,6 +585,7 @@ export type Database = {
           salary_currency?: string;
           location?: string | null;
           is_remote?: boolean;
+          workplace_type?: 'remote' | 'hybrid' | 'on_site';
           application_deadline?: string | null;
           sponsorship_status?: SponsorshipStatus;
           sponsorship_source?: string | null;
@@ -639,6 +641,20 @@ export type Database = {
         Update: Partial<
           Pick<Database['public']['Tables']['job_applications']['Row'], 'status' | 'cover_note'>
         >;
+        Relationships: [];
+      };
+      saved_jobs: {
+        Row: {
+          user_id: string;
+          job_id: string;
+          created_at: string;
+        };
+        Insert: {
+          user_id: string;
+          job_id: string;
+          created_at?: string;
+        };
+        Update: never;
         Relationships: [];
       };
       services: {

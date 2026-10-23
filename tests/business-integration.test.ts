@@ -17,7 +17,7 @@ describeIntegration('CommunityHub business ownership and catalog access', () => 
   let owner: SupabaseClient;
   let other: SupabaseClient;
   async function createUser(label: string) {
-    const email = `phase4-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`;
+    const email = `phase4-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const { data, error } = await admin!.auth.admin.createUser({
       email,
       password: 'phase-four-test-password',
@@ -82,7 +82,9 @@ describeIntegration('CommunityHub business ownership and catalog access', () => 
     const unauthorizedProduct = await other
       .from('products')
       .update({ price: 0 })
-      .eq('id', product.data!.id);
+      .eq('id', product.data!.id)
+      .select('id')
+      .single();
     expect(unauthorizedProduct.error).toBeTruthy();
     const unauthorizedOrder = await other.from('orders').insert({
       buyer_id: otherAccount.id,

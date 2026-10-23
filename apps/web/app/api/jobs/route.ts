@@ -12,8 +12,8 @@ export async function GET(request: Request) {
     .limit(limit + 1);
   if (query) builder = builder.ilike('title', `%${query.replace(/[%_]/g, '')}%`);
   if (params.get('sponsorshipStatus'))
-    builder = builder.eq('sponsorship_status', params.get('sponsorshipStatus')!);
-  if (params.get('jobType')) builder = builder.eq('job_type', params.get('jobType')!);
+    builder = builder.eq('sponsorship_status', params.get('sponsorshipStatus')! as never);
+  if (params.get('jobType')) builder = builder.eq('job_type', params.get('jobType')! as never);
   if (params.get('location'))
     builder = builder.ilike('location', `%${params.get('location')!.replace(/[%_]/g, '')}%`);
   if (cursor) builder = builder.lt('created_at', cursor);
@@ -54,6 +54,7 @@ export async function POST(request: Request) {
         typeof body.salaryCurrency === 'string' ? body.salaryCurrency.toUpperCase() : 'GBP',
       location: typeof body.location === 'string' ? body.location : null,
       is_remote: body.isRemote === true,
+      workplace_type: ['remote', 'hybrid', 'on_site'].includes(String(body.workplaceType)) ? (body.workplaceType as 'remote' | 'hybrid' | 'on_site') : 'on_site',
       application_deadline:
         typeof body.applicationDeadline === 'string' ? body.applicationDeadline : null,
       sponsorship_status:

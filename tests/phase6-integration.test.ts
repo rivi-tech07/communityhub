@@ -18,7 +18,7 @@ suite('CommunityHub Phase 6 transaction access', () => {
     if (admin) await Promise.all(created.splice(0).map((id) => admin.auth.admin.deleteUser(id)));
   });
   async function account(label: string) {
-    const email = `phase6-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`;
+    const email = `phase6-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const { data, error } = await admin!.auth.admin.createUser({
       email,
       password: 'phase-six-test-password',

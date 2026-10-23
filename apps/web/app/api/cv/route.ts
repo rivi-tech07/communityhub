@@ -45,3 +45,11 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: 'Unable to register CV.' }, { status: 400 });
   return NextResponse.json({ document: data, upload });
 }
+
+export async function GET(request: Request) {
+  const result = await authenticate(request);
+  if (result instanceof NextResponse) return result;
+  const { data, error } = await result.client.from('cv_documents').select('id, file_name, mime_type, size_bytes, created_at').order('created_at', { ascending: false });
+  if (error) return NextResponse.json({ error: 'Unable to load CV documents.' }, { status: 503 });
+  return NextResponse.json({ documents: data ?? [] });
+}

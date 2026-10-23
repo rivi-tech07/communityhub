@@ -1,0 +1,27 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { createSupabaseClient, getSupabaseConfig } from '@communityhub/shared';
+
+type Job = { id: string; title: string; description: string; job_type: string; location: string | null; workplace_type: string; salary_min: number | null; salary_max: number | null; salary_currency: string; sponsorship_status: string; application_deadline: string | null };
+const config = getSupabaseConfig({ NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY });
+const supabase = config ? createSupabaseClient(config) : null;
+
+export default function JobDetailPage({ params }: { params: Promise<{ jobId: string }> }) {
+  const [job, setJob] = useState<Job | null>(null); const [coverNote, setCoverNote] = useState(''); const [file, setFile] = useState<File | null>(null); const [message, setMessage] = useState(''); const [loading, setLoading] = useState(true); const [saved, setSaved] = useState(false);
+  const [jobId, setJobId] = useState('');
+  useEffect(() => { void params.then(({ jobId: value }) => { setJobId(value); fetch(`/api/jobs/${value}`).then((response) => response.json()).then((body) => { setJob(body.job ?? null); if (!body.job) setMessage(body.error ?? 'Job not found.'); }).catch(() => setMessage('Unable to load job.')).finally(() => setLoading(false)); }); }, [params]);
+  async function token() { return (await supabase?.auth.getSession())?.data.session?.access_token ?? null; }
+  async function request(path: string, init?: RequestInit) { const accessToken = await token(); if (!accessToken) throw new Error('Sign in before applying or saving jobs.'); const response = await fetch(path, { ...init, headers: { Authorization: `Bearer ${accessToken}`, ...(init?.body ? { 'Content-Type': 'application/json' } : {}) } }); const body = await response.json(); if (!response.ok) throw new Error(body.error ?? 'Request failed.'); return body; }
+  async function saveJob() { try { await request('/api/jobs/saved', { method: saved ? 'DELETE' : 'POST', ...(saved ? { headers: { Authorization: `Bearer ${await token()}` } } : { body: JSON.stringify({ jobId }) }) }); setSaved(!saved); setMessage(saved ? 'Removed from saved jobs.' : 'Job saved.'); } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to save job.'); } }
+  async function apply() {
+    try {
+      let cvDocumentId: string | undefined;
+      if (file) { if (file.size > 10485760) throw new Error('CV must be 10 MB or smaller.'); const uploadPayload = await request('/api/cv', { method: 'POST', body: JSON.stringify({ fileName: file.name, mimeType: file.type, sizeBytes: file.size }) }); const upload = uploadPayload.upload as { path: string; token: string }; const result = await supabase?.storage.from('private-documents').uploadToSignedUrl(upload.path, upload.token, file); if (result?.error) throw result.error; cvDocumentId = uploadPayload.document.id; }
+      await request('/api/jobs/applications', { method: 'POST', body: JSON.stringify({ jobId, cvDocumentId, coverNote }) }); setMessage('Application submitted.');
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to submit application.'); }
+  }
+  if (loading) return <main className="directory-page"><p className="loading-state">Loading job…</p></main>;
+  if (!job) return <main className="directory-page"><p className="error">{message || 'Job not found.'}</p><a className="back-link" href="/jobs">Back to jobs</a></main>;
+  return <main className="directory-page"><a className="back-link" href="/jobs">← Back to jobs</a><header className="job-detail-header"><div><p className="eyebrow">{job.job_type.replaceAll('_', ' ')} · {job.workplace_type.replaceAll('_', ' ')}</p><h1>{job.title}</h1><p className="muted">{job.location ?? 'Location not specified'} · {job.salary_min !== null ? `${job.salary_currency} ${job.salary_min}–${job.salary_max ?? ''}` : 'Salary not listed'}</p><p className="muted">Sponsorship: {job.sponsorship_status.replaceAll('_', ' ')}</p></div><button className="secondary-action" onClick={() => void saveJob()}>{saved ? 'Remove saved job' : 'Save job'}</button></header><section className="job-detail-layout"><article className="profile-web-card"><h2>About the role</h2><p className="job-description">{job.description}</p>{job.application_deadline && <p className="muted">Application deadline: {new Date(job.application_deadline).toLocaleString()}</p>}</article><section className="profile-web-card"><h2>Apply securely</h2><p className="muted">Your CV is stored privately and shared only with the employer for this application.</p><label className="job-form-label">CV (PDF, DOC or DOCX, max 10 MB)<input type="file" accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label><label className="job-form-label">Cover note<textarea value={coverNote} onChange={(event) => setCoverNote(event.target.value)} maxLength={5000} placeholder="Tell the employer why you are a good fit" /></label><button className="primary-action" onClick={() => void apply()}>Submit application</button>{message && <p className="status">{message}</p>}</section></section></main>;
+}

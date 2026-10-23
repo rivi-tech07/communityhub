@@ -17,6 +17,13 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body || typeof body.jobId !== 'string')
     return NextResponse.json({ error: 'Job is required.' }, { status: 400 });
+  if (typeof body.coverNote === 'string' && body.coverNote.length > 5000)
+    return NextResponse.json({ error: 'Cover note must be 5,000 characters or fewer.' }, { status: 400 });
+  if (body.cvDocumentId !== undefined) {
+    if (typeof body.cvDocumentId !== 'string') return NextResponse.json({ error: 'CV document is invalid.' }, { status: 400 });
+    const { data: cv, error: cvError } = await result.client.from('cv_documents').select('id').eq('id', body.cvDocumentId).eq('user_id', result.user.id).maybeSingle();
+    if (cvError || !cv) return NextResponse.json({ error: 'You can only attach your own CV.' }, { status: 403 });
+  }
   const { data, error } = await result.client
     .from('job_applications')
     .insert({

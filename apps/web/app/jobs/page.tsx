@@ -1,74 +1,17 @@
 'use client';
+
 import { useEffect, useState } from 'react';
-type Job = {
-  id: string;
-  title: string;
-  description: string;
-  job_type: string;
-  location: string | null;
-  salary_min: number | null;
-  salary_max: number | null;
-  salary_currency: string;
-  sponsorship_status: string;
-  application_deadline: string | null;
-};
+
+type Job = { id: string; title: string; description: string; job_type: string; location: string | null; workplace_type: 'remote' | 'hybrid' | 'on_site'; salary_min: number | null; salary_max: number | null; salary_currency: string; sponsorship_status: string; application_deadline: string | null };
+
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [query, setQuery] = useState('');
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      fetch(`/api/jobs?q=${encodeURIComponent(query)}`)
-        .then((response) => response.json())
-        .then((body) => setJobs(body.jobs ?? []));
-    }, 180);
-    return () => clearTimeout(timer);
-  }, [query]);
-  return (
-    <main className="directory-page">
-      <header className="directory-header">
-        <div>
-          <p className="eyebrow">COMMUNITYHUB / JOBS</p>
-          <h1>Find your next opportunity</h1>
-          <p className="muted">
-            Sponsorship labels show what employers have declared or what evidence has been
-            independently checked.
-          </p>
-        </div>
-        <a className="back-link" href="/">
-          Dashboard
-        </a>
-      </header>
-      <div className="directory-search">
-        <input
-          placeholder="Search job titles"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
-      <section className="business-grid">
-        {jobs.map((job) => (
-          <article className="business-card" key={job.id}>
-            <span className="business-category">{job.job_type.replace('_', ' ')}</span>
-            <h2>{job.title}</h2>
-            <p>{job.description}</p>
-            <small>
-              {job.location ?? 'Location not specified'} ·{' '}
-              {job.salary_min
-                ? `${job.salary_currency} ${job.salary_min}–${job.salary_max ?? ''}`
-                : 'Salary not listed'}
-            </small>
-            <strong className="sponsorship-label">
-              Sponsorship: {job.sponsorship_status.replaceAll('_', ' ')}
-            </strong>
-            {job.application_deadline && (
-              <small>Apply by {new Date(job.application_deadline).toLocaleDateString()}</small>
-            )}
-          </article>
-        ))}
-        {jobs.length === 0 && (
-          <p className="empty-state">No currently published jobs match this search.</p>
-        )}
-      </section>
-    </main>
-  );
+  const [query, setQuery] = useState(''); const [jobType, setJobType] = useState(''); const [location, setLocation] = useState(''); const [sponsorshipStatus, setSponsorshipStatus] = useState('');
+  const [loading, setLoading] = useState(true); const [message, setMessage] = useState('');
+  async function loadJobs() {
+    try { setLoading(true); const params = new URLSearchParams(); if (query.trim()) params.set('q', query.trim()); if (jobType) params.set('jobType', jobType); if (location.trim()) params.set('location', location.trim()); if (sponsorshipStatus) params.set('sponsorshipStatus', sponsorshipStatus); const response = await fetch(`/api/jobs?${params}`); const body = await response.json(); if (!response.ok) throw new Error(body.error ?? 'Unable to load jobs.'); setJobs(body.jobs ?? []); }
+    catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to load jobs.'); } finally { setLoading(false); }
+  }
+  useEffect(() => { void loadJobs(); }, [jobType, sponsorshipStatus]);
+  return <main className="directory-page"><header className="directory-header"><div><p className="eyebrow">COMMUNITYHUB / JOBS</p><h1>Find your next opportunity</h1><p className="muted">Search verified listings with clear salary, workplace, employment and sponsorship information.</p></div><div className="directory-links"><a href="/jobs/applications">My applications</a><a href="/jobs/saved">Saved jobs</a><a href="/">Dashboard</a></div></header><form className="job-filters" onSubmit={(event) => { event.preventDefault(); void loadJobs(); }}><input placeholder="Search job titles" value={query} onChange={(event) => setQuery(event.target.value)} /><input placeholder="Location" value={location} onChange={(event) => setLocation(event.target.value)} /><select value={jobType} onChange={(event) => setJobType(event.target.value)}><option value="">All employment types</option><option value="full_time">Full time</option><option value="part_time">Part time</option><option value="contract">Contract</option><option value="temporary">Temporary</option><option value="internship">Internship</option></select><select value={sponsorshipStatus} onChange={(event) => setSponsorshipStatus(event.target.value)}><option value="">All sponsorship labels</option><option value="employer_declared">Employer declared</option><option value="independently_checked">Independently checked</option><option value="not_offered">Not offered</option><option value="unknown">Unknown</option></select><button className="primary-action" type="submit">Search</button></form>{message && <p className="error">{message} <button className="inline-control" type="button" onClick={() => void loadJobs()}>Retry</button></p>}{loading ? <p className="loading-state">Loading jobs…</p> : <section className="business-grid">{jobs.map((job) => <a className="business-card" href={`/jobs/${job.id}`} key={job.id}><span className="business-category">{job.job_type.replaceAll('_', ' ')}</span><h2>{job.title}</h2><p>{job.description}</p><small>{job.location ?? 'Location not specified'} · {job.workplace_type.replaceAll('_', ' ')}</small><small>{job.salary_min !== null ? `${job.salary_currency} ${job.salary_min}–${job.salary_max ?? ''}` : 'Salary not listed'}</small><strong className="sponsorship-label">Sponsorship: {job.sponsorship_status.replaceAll('_', ' ')}</strong>{job.application_deadline && <small>Apply by {new Date(job.application_deadline).toLocaleDateString()}</small>}</a>)}{jobs.length === 0 && <p className="empty-state">No currently published jobs match these filters.</p>}</section>}</main>;
 }

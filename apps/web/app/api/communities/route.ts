@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server';
-import { authenticate } from '../../lib/server-auth';
+import { authenticate, getPublicClient } from '../../lib/server-auth';
 import { pageParams } from '../../lib/pagination';
 import { type CommunityType, type CommunityVisibility } from '@communityhub/shared';
 
 export async function GET(request: Request) {
-  const result = await authenticate(request);
+  const params = new URL(request.url).searchParams;
+  const publicOnly = params.get('public') === 'true';
+  const result = publicOnly ? null : await authenticate(request);
   if (result instanceof NextResponse) return result;
   const { limit, cursor, query } = pageParams(request.url);
-  let builder = result.client.from('communities').select('*').order('created_at', { ascending: false }).limit(limit + 1);
+  let builder = (result?.client ?? getPublicClient()).from('communities').select('*').order('created_at', { ascending: false }).limit(limit + 1);
+  if (publicOnly) builder = builder.eq('visibility', 'public');
   if (query) builder = builder.ilike('name', `%${query.replace(/[%_]/g, '')}%`);
   if (cursor) builder = builder.lt('created_at', cursor);
   const { data, error } = await builder;
