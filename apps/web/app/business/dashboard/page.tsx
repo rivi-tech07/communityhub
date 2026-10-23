@@ -19,7 +19,9 @@ type Product = {
   unit: string;
   stock_quantity: number;
   availability: boolean;
+  image_url?: string | null;
 };
+type CatalogProduct = { id: string; name: string; category: string; default_unit: string };
 type BusinessReport = {
   todaySales: number;
   completedOrders: number;
@@ -37,12 +39,17 @@ export default function BusinessDashboard() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [selected, setSelected] = useState<Business | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
+  const [catalog, setCatalog] = useState<CatalogProduct[]>([]);
   const [report, setReport] = useState<BusinessReport | null>(null);
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [category, setCategory] = useState('');
   const [productName, setProductName] = useState('');
   const [productPrice, setProductPrice] = useState('');
+  const [productStock, setProductStock] = useState('1');
+  const [catalogProductId, setCatalogProductId] = useState('');
+  const [productPhoto, setProductPhoto] = useState<File | null>(null);
+  const [stockDraft, setStockDraft] = useState<Record<string, string>>({});
   const [message, setMessage] = useState('');
   async function call(path: string, init?: RequestInit) {
     const session = await supabase?.auth.getSession();
@@ -101,28 +108,55 @@ export default function BusinessDashboard() {
     event.preventDefault();
     if (!selected) return;
     try {
+      const selectedCatalog = catalog.find((item) => item.id === catalogProductId);
+      const productLabel = productName.trim() || selectedCatalog?.name;
+      if (!productLabel) throw new Error('Choose a common product or enter a custom product name.');
       const payload = await call('/api/products', {
         method: 'POST',
         body: JSON.stringify({
           businessId: selected.id,
-          name: productName,
-          slug: productName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+          name: productLabel,
+          slug: productLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
           price: Number(productPrice),
           currency: 'GBP',
           unit: 'each',
-          stockQuantity: 0,
+          stockQuantity: Number(productStock),
+          availability: Number(productStock) > 0,
+          catalogProductId: catalogProductId || undefined,
         }),
       });
-      setProducts((current) => [...current, payload.product]);
+      if (productPhoto) {
+        const session = await supabase?.auth.getSession();
+        const token = session?.data.session?.access_token;
+        const uploadResponse = await fetch(`/api/products/${payload.product.id}/media`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ fileName: productPhoto.name, mimeType: productPhoto.type, sizeBytes: productPhoto.size }) });
+        const uploadPayload = await uploadResponse.json();
+        if (!uploadResponse.ok || !uploadPayload.upload?.path || !uploadPayload.upload?.token || !supabase) throw new Error(uploadPayload.error ?? 'Unable to prepare product photo upload.');
+        const { error: uploadError } = await supabase.storage.from('business-media').uploadToSignedUrl(uploadPayload.upload.path, uploadPayload.upload.token, productPhoto);
+        if (uploadError) throw uploadError;
+      }
+      await choose(selected);
       setProductName('');
       setProductPrice('');
-      setMessage('Product saved as unavailable until stock is configured.');
+      setProductStock('1');
+      setCatalogProductId('');
+      setProductPhoto(null);
+      setMessage('Product saved. It will appear publicly when the business is verified and published.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to add product.');
     }
   }
+  async function updateStock(product: Product) {
+    try {
+      const stock = Number(stockDraft[product.id] ?? product.stock_quantity);
+      if (!Number.isFinite(stock) || stock < 0) throw new Error('Stock must be zero or more.');
+      await call(`/api/products/${product.id}`, { method: 'PATCH', body: JSON.stringify({ stock_quantity: stock, availability: stock > 0 }) });
+      await choose(selected!);
+      setMessage(`${product.name} stock updated.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to update stock.'); }
+  }
   useEffect(() => {
     void load();
+    void fetch('/api/product-catalog', { cache: 'no-store' }).then((response) => response.json()).then((payload) => setCatalog(payload.products ?? []));
   }, []);
   return (
     <main className="business-dashboard-shell">
@@ -219,21 +253,27 @@ export default function BusinessDashboard() {
               <h3>Products</h3>
               {products.map((product) => (
                 <div className="product-row" key={product.id}>
+                  {product.image_url && <img className="product-row-image" src={product.image_url} alt="" />}
                   <span>
                     <strong>{product.name}</strong>
                     <small>
                       {product.currency} {product.price.toFixed(2)} / {product.unit}
                     </small>
                   </span>
-                  <span>
+                  <span className="product-row-stock">
                     {product.availability ? 'Available' : 'Unavailable'} · {product.stock_quantity}{' '}
                     in stock
+                    <input aria-label={`Stock for ${product.name}`} type="number" min="0" step="1" value={stockDraft[product.id] ?? product.stock_quantity} onChange={(event) => setStockDraft((current) => ({ ...current, [product.id]: event.target.value }))} />
+                    <button type="button" className="secondary-action" onClick={() => void updateStock(product)}>Update stock</button>
                   </span>
                 </div>
               ))}
               <form onSubmit={addProduct} className="inline-form">
+                <select value={catalogProductId} onChange={(event) => { setCatalogProductId(event.target.value); const item = catalog.find((entry) => entry.id === event.target.value); if (item) { setProductName(item.name); } }}>
+                  <option value="">Choose common product</option>
+                  {catalog.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.category}</option>)}
+                </select>
                 <input
-                  required
                   placeholder="Product name"
                   value={productName}
                   onChange={(event) => setProductName(event.target.value)}
@@ -247,6 +287,16 @@ export default function BusinessDashboard() {
                   value={productPrice}
                   onChange={(event) => setProductPrice(event.target.value)}
                 />
+                <input
+                  required
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="Stock quantity"
+                  value={productStock}
+                  onChange={(event) => setProductStock(event.target.value)}
+                />
+                <label className="file-action">Product photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setProductPhoto(event.target.files?.[0] ?? null)} /></label>
                 <button className="primary-action">Add product</button>
               </form>
               <div className="delivery-note">

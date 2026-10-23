@@ -370,6 +370,7 @@ export type Database = {
         Row: {
           id: string;
           business_id: string;
+          catalog_product_id: string | null;
           category_id: string | null;
           name: string;
           slug: string;
@@ -422,6 +423,12 @@ export type Database = {
           sort_order?: number;
         };
         Update: Partial<Pick<Database['public']['Tables']['product_images']['Row'], 'sort_order'>>;
+        Relationships: [];
+      };
+      product_catalog: {
+        Row: { id: string; name: string; slug: string; category: string; default_unit: string; is_active: boolean; created_at: string };
+        Insert: Omit<Database['public']['Tables']['product_catalog']['Row'], 'id' | 'created_at'>;
+        Update: Partial<Pick<Database['public']['Tables']['product_catalog']['Row'], 'name' | 'slug' | 'category' | 'default_unit' | 'is_active'>>;
         Relationships: [];
       };
       delivery_configs: {

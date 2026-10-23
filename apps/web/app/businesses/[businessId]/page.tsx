@@ -20,6 +20,7 @@ type Product = {
   unit: string;
   stock_quantity: number;
   discount_percentage: number;
+  image_url?: string | null;
 };
 export default function BusinessPage({ params }: { params: Promise<{ businessId: string }> }) {
   const [business, setBusiness] = useState<Business | null>(null);
@@ -28,13 +29,18 @@ export default function BusinessPage({ params }: { params: Promise<{ businessId:
   useEffect(() => {
     void params.then(async ({ businessId }) => {
       const [businessResponse, productResponse] = await Promise.all([
-        fetch(`/api/businesses/${businessId}`),
-        fetch(`/api/products?businessId=${businessId}`),
+        fetch(`/api/businesses/${businessId}`, { cache: 'no-store' }),
+        fetch(`/api/products?businessId=${businessId}`, { cache: 'no-store' }),
       ]);
       const businessPayload = await businessResponse.json();
       const productPayload = await productResponse.json();
       if (!businessResponse.ok) {
         setMessage(businessPayload.error ?? 'Business not found.');
+        return;
+      }
+      if (!productResponse.ok) {
+        setBusiness(businessPayload.business);
+        setMessage(productPayload.error ?? 'Unable to load this catalog.');
         return;
       }
       setBusiness(businessPayload.business);
@@ -74,6 +80,7 @@ export default function BusinessPage({ params }: { params: Promise<{ businessId:
       <section className="product-grid">
         {products.map((product) => (
           <article className="product-card" key={product.id}>
+            {product.image_url && <img className="product-card-image" src={product.image_url} alt="" />}
             <span className="product-unit">{product.unit}</span>
             <h3>{product.name}</h3>
             <p>{product.description}</p>
@@ -89,7 +96,7 @@ export default function BusinessPage({ params }: { params: Promise<{ businessId:
           </article>
         ))}
       </section>
-      {!products.length && (
+      {!products.length && !message && (
         <div className="empty-state">
           <strong>No published products yet</strong>
           <p>This business is preparing its catalog.</p>
