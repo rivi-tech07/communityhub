@@ -65,6 +65,14 @@ export default function AuthClient() {
     setRegistration((current) => ({ ...current, [field]: value }));
   }
 
+  async function redirectAfterLogin(userId: string) {
+    const { data: roles, error: roleError } = await supabase!.from('user_roles').select('role').eq('user_id', userId);
+    if (roleError) throw roleError;
+    const isAdmin = roles?.some((entry) => entry.role === 'administrator' || entry.role === 'moderator');
+    router.replace(isAdmin ? '/admin/businesses' : '/');
+    router.refresh();
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -118,8 +126,7 @@ export default function AuthClient() {
         if (!password) throw new Error('Enter a password.');
         const result = await supabase.auth.signInWithPassword({ email: identifier.trim(), password });
         if (result.error) throw result.error;
-        router.replace('/');
-        router.refresh();
+        await redirectAfterLogin(result.data.user.id);
       } else if (!sentAt) {
         const { error: otpError } = await supabase.auth.signInWithOtp({ phone: identifier.trim() });
         if (otpError) throw otpError;
@@ -130,8 +137,9 @@ export default function AuthClient() {
       } else {
         const { error: verifyError } = await supabase.auth.verifyOtp({ phone: identifier.trim(), token: otp, type: 'sms' });
         if (verifyError) throw verifyError;
-        router.replace('/');
-        router.refresh();
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError || !userData.user) throw userError ?? new Error('Unable to load the signed-in account.');
+        await redirectAfterLogin(userData.user.id);
       }
     } catch (authError) {
       setError(normalizeAuthError(authError));
@@ -164,7 +172,7 @@ export default function AuthClient() {
         <div className="auth-mark">✦</div>
         <p className="eyebrow">COMMUNITYHUB</p>
         <h1>{title}</h1>
-        <p className="muted">Use a verified identity to keep the community safe.</p>
+        <p className="muted">Use one secure sign-in. Your account role decides which workspace opens next.</p>
 
         <div className="auth-tabs">
           <button className={mode === 'email' ? 'selected' : ''} onClick={() => switchMode('email')}>Email</button>
@@ -222,7 +230,7 @@ export default function AuthClient() {
         {status && <p className="status">{status}</p>}
         <div className="auth-footer">
           <button onClick={() => { setRecovery(!recovery); setError(''); setStatus(''); }}>{recovery ? 'Back to sign in' : 'Forgot password?'}</button>
-          <button onClick={toggleRegistration}>{isRegistering ? 'Already have an account?' : 'Create an account'}</button>
+          <button type="button" onClick={toggleRegistration}>{isRegistering ? 'Already have an account?' : 'Create an account'}</button>
         </div>
       </section>
     </main>

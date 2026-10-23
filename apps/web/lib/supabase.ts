@@ -1,4 +1,5 @@
-import { createSupabaseClient, getSupabaseConfig } from '@communityhub/shared';
+import { createBrowserClient } from '@supabase/ssr';
+import { getSupabaseConfig, type Database } from '@communityhub/shared';
 
 export const supabaseConfig = getSupabaseConfig({ NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY });
-export const supabase = supabaseConfig ? createSupabaseClient(supabaseConfig) : null;
+export const supabase = supabaseConfig ? createBrowserClient<Database>(supabaseConfig.url, supabaseConfig.anonKey) : null;
