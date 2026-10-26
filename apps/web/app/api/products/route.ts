@@ -30,7 +30,21 @@ export async function GET(request: Request) {
   if (params.get('categoryId')) builder = builder.eq('category_id', params.get('categoryId')!);
   if (query) builder = builder.ilike('name', `%${query.replace(/[%_]/g, '')}%`);
   if (cursor) builder = builder.lt('created_at', cursor);
-  const { data, error } = await builder;
+  let { data, error } = await builder;
+  if (error) {
+    let fallback = client
+      .from('products')
+      .select('*, businesses(id, name, city, country)')
+      .order('created_at', { ascending: false })
+      .limit(limit + 1);
+    if (params.get('businessId')) fallback = fallback.eq('business_id', params.get('businessId')!);
+    if (params.get('categoryId')) fallback = fallback.eq('category_id', params.get('categoryId')!);
+    if (query) fallback = fallback.ilike('name', `%${query.replace(/[%_]/g, '')}%`);
+    if (cursor) fallback = fallback.lt('created_at', cursor);
+    const fallbackResult = await fallback;
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
   if (error) return NextResponse.json({ error: 'Unable to load products.' }, { status: 503 });
   const rows = data ?? [];
   const products = await Promise.all(

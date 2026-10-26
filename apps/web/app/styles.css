@@ -689,6 +689,33 @@ html[data-theme='dark'] .comment-form input {
   max-width: 640px;
   margin-bottom: 24px;
 }
+
+.shop-location-bar,
+.shop-basket-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--glass-surface);
+  padding: 1rem 1.1rem;
+}
+
+.shop-location-label {
+  display: block;
+  color: var(--muted);
+  font-size: .7rem;
+  font-weight: 800;
+  letter-spacing: .12em;
+  margin-bottom: .25rem;
+}
+
+.shop-eta { color: var(--muted); font-size: .9rem; }
+
+.shop-categories { display: flex; gap: .55rem; overflow-x: auto; padding: .9rem 0 1.2rem; }
+.shop-categories button { border: 1px solid var(--line); border-radius: 999px; background: var(--glass-surface); color: var(--ink); padding: .65rem .9rem; white-space: nowrap; }
+.shop-categories button.selected { background: var(--mint); border-color: var(--green); color: var(--green); font-weight: 800; }
 .directory-search input {
   flex: 1;
   border: 1px solid var(--line);
@@ -2832,6 +2859,11 @@ html[data-accent='purple'] .profile-settings-link {
   flex-direction: column;
   align-items: flex-start;
 }
+
+.product-image-placeholder { display: grid; place-items: center; aspect-ratio: 1.4; border-radius: 12px; background: linear-gradient(135deg, color-mix(in srgb, var(--green) 28%, var(--glass-surface)), var(--glass-surface)); color: var(--green); font-size: 2rem; font-weight: 900; margin-bottom: .8rem; }
+.shop-basket-bar { position: sticky; bottom: 1rem; z-index: 5; margin-top: 1.25rem; box-shadow: 0 16px 40px rgb(0 0 0 / 18%); }
+.shop-basket-bar div { display: grid; gap: .2rem; }
+.shop-basket-bar span { color: var(--muted); font-size: .85rem; }
 .shop-product-card .secondary-action {
   display: inline-block;
   margin-top: auto;
