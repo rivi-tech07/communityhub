@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { authenticate } from '../../../lib/server-auth';
-import { requireFeature } from '../../../lib/feature-flags';
+import { authenticate } from '../../../../lib/server-auth';
+import { requireFeature } from '../../../../lib/feature-flags';
 export async function POST(request: Request) {
   const disabled = await requireFeature(request, 'service_enquiries');
   if (disabled) return disabled;

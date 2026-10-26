@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { authenticate, getAdminClient } from '../../../lib/server-auth';
-import { requireFeature } from '../../../lib/feature-flags';
+import { authenticate, getAdminClient } from '../../../../lib/server-auth';
+import { requireFeature } from '../../../../lib/feature-flags';
 import {
   createProviderPayment,
   isSupportedCheckoutCurrency,
   resolveProvider,
-} from '../../../lib/payments';
+} from '../../../../lib/payments';
 
 async function releaseOrderStock(client: ReturnType<typeof getAdminClient>, orderId: string) {
   const { data: reservations, error } = await client
