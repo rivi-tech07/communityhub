@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { isKnownFeatureKey } from '@communityhub/shared';
+import { isKnownFeatureKey } from '../../../../lib/feature-flags';
 import { getAdminClient, requireRole } from '../../../lib/server-auth';
 
 export async function GET(request: Request) {
