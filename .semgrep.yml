@@ -1,0 +1,33 @@
+rules:
+  - id: communityhub-secret-literal
+    message: Secret-like provider material must not be committed.
+    severity: ERROR
+    languages: [generic]
+    pattern-regex: (?i)(sk_live_[A-Za-z0-9]+|rzp_live_[A-Za-z0-9]+|sb_secret_[A-Za-z0-9_\-]+)
+
+  - id: communityhub-service-role-jwt
+    message: Supabase service-role JWT material must remain server-side and out of source.
+    severity: ERROR
+    languages: [generic]
+    pattern-regex: (?i)"role"\s*:\s*"service_role"
+
+  - id: communityhub-no-eval
+    message: Do not use eval or Function constructors in application code.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+
+  - id: communityhub-client-secret-env
+    message: Client code must not read server-only secrets from process.env.
+    severity: ERROR
+    languages: [javascript, typescript]
+    patterns:
+      - pattern: process.env.$KEY
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: '(?i).*(SERVICE_ROLE|SECRET|WEBHOOK|PAYMENT).*'
+    paths:
+      include: [apps/mobile/**, apps/web/app/**, apps/web/utils/**]
+      exclude: [apps/web/app/api/**]

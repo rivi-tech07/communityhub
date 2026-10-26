@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "batch": "batch2",
+  "verified": false,
+  "verified_at": null,
+  "verified_by": null,
+  "commands_run": [],
+  "notes": "Set verified=true only after pnpm db:reset && pnpm db:seed && pnpm test passes against a disposable Supabase project. See docs/status/batch2.md."
+}

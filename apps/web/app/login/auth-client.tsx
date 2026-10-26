@@ -47,7 +47,8 @@ export default function AuthClient() {
 
   const resendDisabled = remaining > 0 || busy;
   const title = useMemo(
-    () => (recovery ? 'Recover your account' : isRegistering ? 'Join your community' : 'Welcome back'),
+    () =>
+      recovery ? 'Recover your account' : isRegistering ? 'Join your community' : 'Welcome back',
     [recovery, isRegistering],
   );
 
@@ -66,9 +67,14 @@ export default function AuthClient() {
   }
 
   async function redirectAfterLogin(userId: string) {
-    const { data: roles, error: roleError } = await supabase!.from('user_roles').select('role').eq('user_id', userId);
+    const { data: roles, error: roleError } = await supabase!
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', userId);
     if (roleError) throw roleError;
-    const isAdmin = roles?.some((entry) => entry.role === 'administrator' || entry.role === 'moderator');
+    const isAdmin = roles?.some(
+      (entry) => entry.role === 'administrator' || entry.role === 'moderator',
+    );
     router.replace(isAdmin ? '/admin/businesses' : '/');
     router.refresh();
   }
@@ -87,7 +93,8 @@ export default function AuthClient() {
 
     try {
       if (recovery) {
-        if (mode !== 'email') throw new Error('Password recovery is currently available by email only.');
+        if (mode !== 'email')
+          throw new Error('Password recovery is currently available by email only.');
         const { error: recoveryError } = await supabase.auth.resetPasswordForEmail(identifier, {
           redirectTo: `${window.location.origin}/reset-password`,
         });
@@ -104,9 +111,17 @@ export default function AuthClient() {
         };
 
         if (mode === 'email') {
-          const result = await supabase.auth.signUp({ email: identifier.trim(), password, options });
+          const result = await supabase.auth.signUp({
+            email: identifier.trim(),
+            password,
+            options,
+          });
           if (result.error) throw result.error;
-          setStatus(result.data.session ? 'Account created. Redirecting…' : 'Account created. Check your email to verify your address.');
+          setStatus(
+            result.data.session
+              ? 'Account created. Redirecting…'
+              : 'Account created. Check your email to verify your address.',
+          );
           if (result.data.session) {
             router.replace('/');
             router.refresh();
@@ -124,7 +139,10 @@ export default function AuthClient() {
         }
       } else if (mode === 'email' || usePassword) {
         if (!password) throw new Error('Enter a password.');
-        const result = await supabase.auth.signInWithPassword({ email: identifier.trim(), password });
+        const result = await supabase.auth.signInWithPassword({
+          email: identifier.trim(),
+          password,
+        });
         if (result.error) throw result.error;
         await redirectAfterLogin(result.data.user.id);
       } else if (!sentAt) {
@@ -135,10 +153,15 @@ export default function AuthClient() {
         setRemaining(60);
         setStatus('OTP request accepted by Supabase. Enter the code only after it arrives.');
       } else {
-        const { error: verifyError } = await supabase.auth.verifyOtp({ phone: identifier.trim(), token: otp, type: 'sms' });
+        const { error: verifyError } = await supabase.auth.verifyOtp({
+          phone: identifier.trim(),
+          token: otp,
+          type: 'sms',
+        });
         if (verifyError) throw verifyError;
         const { data: userData, error: userError } = await supabase.auth.getUser();
-        if (userError || !userData.user) throw userError ?? new Error('Unable to load the signed-in account.');
+        if (userError || !userData.user)
+          throw userError ?? new Error('Unable to load the signed-in account.');
         await redirectAfterLogin(userData.user.id);
       }
     } catch (authError) {
@@ -172,65 +195,206 @@ export default function AuthClient() {
         <div className="auth-mark">✦</div>
         <p className="eyebrow">COMMUNITYHUB</p>
         <h1>{title}</h1>
-        <p className="muted">Use one secure sign-in. Your account role decides which workspace opens next.</p>
+        <p className="muted">
+          Use one secure sign-in. Your account role decides which workspace opens next.
+        </p>
 
-        <div className="auth-tabs">
-          <button className={mode === 'email' ? 'selected' : ''} onClick={() => switchMode('email')}>Email</button>
-          <button className={mode === 'phone' ? 'selected' : ''} onClick={() => switchMode('phone')}>Phone / SMS</button>
+        <div className="auth-tabs" role="tablist" aria-label="Sign-in method">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'email'}
+            className={mode === 'email' ? 'selected' : ''}
+            onClick={() => switchMode('email')}
+          >
+            Email
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'phone'}
+            className={mode === 'phone' ? 'selected' : ''}
+            onClick={() => switchMode('phone')}
+          >
+            Phone / SMS
+          </button>
         </div>
 
-        <form onSubmit={submit}>
+        <form
+          onSubmit={submit}
+          aria-describedby={error ? 'auth-error' : status ? 'auth-status' : undefined}
+        >
           {isRegistering && !recovery && (
             <>
               <label htmlFor="full-name">FULL NAME</label>
-              <input id="full-name" required value={registration.fullName} onChange={(event) => updateRegistration('fullName', event.target.value)} placeholder="Your name" autoComplete="name" />
+              <input
+                id="full-name"
+                required
+                value={registration.fullName}
+                onChange={(event) => updateRegistration('fullName', event.target.value)}
+                placeholder="Your name"
+                autoComplete="name"
+              />
               <div className="auth-two-fields">
                 <div>
                   <label htmlFor="mobile-number">MOBILE NUMBER</label>
-                  <input id="mobile-number" required type="tel" value={registration.mobile} onChange={(event) => updateRegistration('mobile', event.target.value)} placeholder="+44 7700 900000" autoComplete="tel" />
+                  <input
+                    id="mobile-number"
+                    required
+                    type="tel"
+                    value={registration.mobile}
+                    onChange={(event) => updateRegistration('mobile', event.target.value)}
+                    placeholder="+44 7700 900000"
+                    autoComplete="tel"
+                  />
                 </div>
                 <div>
                   <label htmlFor="date-of-birth">DATE OF BIRTH</label>
-                  <input id="date-of-birth" required type="date" value={registration.dateOfBirth} onChange={(event) => updateRegistration('dateOfBirth', event.target.value)} autoComplete="bday" />
+                  <input
+                    id="date-of-birth"
+                    required
+                    type="date"
+                    value={registration.dateOfBirth}
+                    onChange={(event) => updateRegistration('dateOfBirth', event.target.value)}
+                    autoComplete="bday"
+                  />
                 </div>
               </div>
             </>
           )}
 
           <label htmlFor="identifier">{mode === 'email' ? 'EMAIL ADDRESS' : 'PHONE NUMBER'}</label>
-          <input id="identifier" required type={mode === 'email' ? 'email' : 'tel'} value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder={mode === 'email' ? 'you@example.com' : '+44 7700 900000'} autoComplete={mode === 'email' ? 'email' : 'tel'} />
+          <input
+            id="identifier"
+            required
+            type={mode === 'email' ? 'email' : 'tel'}
+            value={identifier}
+            onChange={(event) => setIdentifier(event.target.value)}
+            placeholder={mode === 'email' ? 'you@example.com' : '+44 7700 900000'}
+            autoComplete={mode === 'email' ? 'email' : 'tel'}
+          />
 
           {!recovery && (mode === 'email' || usePassword || isRegistering) && (
             <>
-              <label htmlFor="password">PASSWORD {mode === 'phone' && !isRegistering && <button type="button" className="inline-control" onClick={() => setUsePassword(!usePassword)}>{usePassword ? 'Use SMS code instead' : 'Use password instead'}</button>}</label>
-              <input id="password" type="password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" minLength={8} autoComplete={isRegistering ? 'new-password' : 'current-password'} />
+              <label htmlFor="password">
+                PASSWORD{' '}
+                {mode === 'phone' && !isRegistering && (
+                  <button
+                    type="button"
+                    className="inline-control"
+                    onClick={() => setUsePassword(!usePassword)}
+                  >
+                    {usePassword ? 'Use SMS code instead' : 'Use password instead'}
+                  </button>
+                )}
+              </label>
+              <input
+                id="password"
+                type="password"
+                required
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="At least 8 characters"
+                minLength={8}
+                autoComplete={isRegistering ? 'new-password' : 'current-password'}
+              />
             </>
           )}
 
           {isRegistering && !recovery && (
             <>
               <label htmlFor="confirm-password">CONFIRM PASSWORD</label>
-              <input id="confirm-password" type="password" required value={registration.confirmPassword} onChange={(event) => updateRegistration('confirmPassword', event.target.value)} placeholder="Enter password again" minLength={8} autoComplete="new-password" />
-              <label className="terms-check"><input type="checkbox" checked={registration.termsAccepted} onChange={(event) => updateRegistration('termsAccepted', event.target.checked)} /> <span>I agree to the <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>.</span></label>
+              <input
+                id="confirm-password"
+                type="password"
+                required
+                value={registration.confirmPassword}
+                onChange={(event) => updateRegistration('confirmPassword', event.target.value)}
+                placeholder="Enter password again"
+                minLength={8}
+                autoComplete="new-password"
+              />
+              <label className="terms-check">
+                <input
+                  type="checkbox"
+                  checked={registration.termsAccepted}
+                  onChange={(event) => updateRegistration('termsAccepted', event.target.checked)}
+                />{' '}
+                <span>
+                  I agree to the <a href="/terms">Terms of Service</a> and{' '}
+                  <a href="/privacy">Privacy Policy</a>.
+                </span>
+              </label>
             </>
           )}
 
           {mode === 'phone' && !usePassword && !isRegistering && sentAt && (
             <>
-              <label htmlFor="otp">SMS CODE <span className="cooldown">{remaining ? `Resend in ${remaining}s` : 'You can resend'}</span></label>
-              <input id="otp" inputMode="numeric" autoComplete="one-time-code" required value={otp} onChange={(event) => setOtp(event.target.value)} placeholder="123456" />
-              <button type="button" className="secondary-action" disabled={resendDisabled} onClick={() => { setSentAt(null); setOtp(''); }}>Resend code</button>
+              <label htmlFor="otp">
+                SMS CODE{' '}
+                <span className="cooldown">
+                  {remaining ? `Resend in ${remaining}s` : 'You can resend'}
+                </span>
+              </label>
+              <input
+                id="otp"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                required
+                value={otp}
+                onChange={(event) => setOtp(event.target.value)}
+                placeholder="123456"
+              />
+              <button
+                type="button"
+                className="secondary-action"
+                disabled={resendDisabled}
+                onClick={() => {
+                  setSentAt(null);
+                  setOtp('');
+                }}
+              >
+                Resend code
+              </button>
             </>
           )}
 
-          <button className="primary-action" disabled={busy}>{busy ? 'Working…' : recovery ? 'Send recovery email' : sentAt && mode === 'phone' && !usePassword ? 'Verify code' : isRegistering ? 'Create account' : 'Sign in'}</button>
+          <button className="primary-action" disabled={busy}>
+            {busy
+              ? 'Working…'
+              : recovery
+                ? 'Send recovery email'
+                : sentAt && mode === 'phone' && !usePassword
+                  ? 'Verify code'
+                  : isRegistering
+                    ? 'Create account'
+                    : 'Sign in'}
+          </button>
         </form>
 
-        {error && <p className="error">{error}</p>}
-        {status && <p className="status">{status}</p>}
+        {error && (
+          <p id="auth-error" className="error" role="alert">
+            {error}
+          </p>
+        )}
+        {status && (
+          <p id="auth-status" className="status" role="status">
+            {status}
+          </p>
+        )}
         <div className="auth-footer">
-          <button onClick={() => { setRecovery(!recovery); setError(''); setStatus(''); }}>{recovery ? 'Back to sign in' : 'Forgot password?'}</button>
-          <button type="button" onClick={toggleRegistration}>{isRegistering ? 'Already have an account?' : 'Create an account'}</button>
+          <button
+            onClick={() => {
+              setRecovery(!recovery);
+              setError('');
+              setStatus('');
+            }}
+          >
+            {recovery ? 'Back to sign in' : 'Forgot password?'}
+          </button>
+          <button type="button" onClick={toggleRegistration}>
+            {isRegistering ? 'Already have an account?' : 'Create an account'}
+          </button>
         </div>
       </section>
     </main>
@@ -240,20 +404,27 @@ export default function AuthClient() {
 function validateRegistration(passwordValue: string, registration: Registration) {
   if (passwordValue.length < 8) throw new Error('Password must be at least 8 characters.');
   if (passwordValue !== registration.confirmPassword) throw new Error('Passwords do not match.');
-  if (!registration.termsAccepted) throw new Error('Accept the Terms of Service and Privacy Policy to continue.');
+  if (!registration.termsAccepted)
+    throw new Error('Accept the Terms of Service and Privacy Policy to continue.');
   const birthDate = new Date(`${registration.dateOfBirth}T00:00:00`);
   const minimumDate = new Date();
   minimumDate.setFullYear(minimumDate.getFullYear() - 13);
-  if (!registration.dateOfBirth || Number.isNaN(birthDate.getTime()) || birthDate > minimumDate) throw new Error('You must be at least 13 years old to create an account.');
+  if (!registration.dateOfBirth || Number.isNaN(birthDate.getTime()) || birthDate > minimumDate)
+    throw new Error('You must be at least 13 years old to create an account.');
 }
 
 function normalizeAuthError(error: unknown) {
   const message = error instanceof Error ? error.message : 'Authentication failed.';
-  if (/failed to fetch|networkerror|load failed/i.test(message)) return 'Cannot reach Supabase. Check apps/web/.env.local for the real project URL and publishable key, then restart the web server.';
-  if (/rate limit|too many|429/i.test(message)) return 'Too many attempts. Wait a little before trying again.';
-  if (/expired|invalid.*token|otp/i.test(message)) return 'That code is invalid or expired. Request a new code and try again.';
-  if (/already registered|already exists|user already/i.test(message)) return 'An account with this identity already exists. Try signing in instead.';
+  if (/failed to fetch|networkerror|load failed/i.test(message))
+    return 'Cannot reach Supabase. Check apps/web/.env.local for the real project URL and publishable key, then restart the web server.';
+  if (/rate limit|too many|429/i.test(message))
+    return 'Too many attempts. Wait a little before trying again.';
+  if (/expired|invalid.*token|otp/i.test(message))
+    return 'That code is invalid or expired. Request a new code and try again.';
+  if (/already registered|already exists|user already/i.test(message))
+    return 'An account with this identity already exists. Try signing in instead.';
   if (/invalid login credentials/i.test(message)) return 'The credentials do not match an account.';
-  if (/provider|sms|phone/i.test(message)) return 'SMS delivery is not configured or the provider rejected this request.';
+  if (/provider|sms|phone/i.test(message))
+    return 'SMS delivery is not configured or the provider rejected this request.';
   return message;
 }

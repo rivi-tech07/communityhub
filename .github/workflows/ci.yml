@@ -9,11 +9,176 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with: { version: 9.15.5 }
+        with: { version: 9 }
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: pnpm }
-      - run: pnpm install
-      - run: pnpm exec prettier --check .
-      - run: pnpm exec tsc -p packages/shared/tsconfig.json --pretty false
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm build:web
+      - run: pnpm check:leaks
+      - run: pnpm check:mobile-no-payments
       - run: pnpm test
       - run: pnpm release:check
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Semgrep policy scan
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: .semgrep.yml
+      - run: pnpm audit:high
+
+  # TODO: remove continue-on-error after this job is green for 5 consecutive runs.
+  integration:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: pnpm install --frozen-lockfile
+      - name: Start disposable Supabase
+        run: supabase start
+      - name: Export local Supabase credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase status -o env > "$RUNNER_TEMP/supabase.env"
+          read_env() {
+            sed -n "s/^$1=//p" "$RUNNER_TEMP/supabase.env" | tr -d '"'
+          }
+          {
+            echo "SUPABASE_URL=$(read_env API_URL)"
+            echo "SUPABASE_ANON_KEY=$(read_env ANON_KEY)"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$(read_env SERVICE_ROLE_KEY)"
+            echo "SUPABASE_DB_URL=$(read_env DB_URL)"
+          } >> "$GITHUB_ENV"
+      - name: Reset database
+        run: pnpm db:reset
+      - name: Assert query plans
+        run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/query-plans.sql
+      - name: Create disposable seed owner
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner_id=$(node <<'NODE'
+          const { createClient } = require('@supabase/supabase-js');
+          const admin = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          });
+          const email = `ci-seed-${Date.now()}@example.test`;
+          admin.auth.admin.createUser({
+            email,
+            password: 'ci-seed-owner-password',
+            email_confirm: true,
+          }).then(({ data, error }) => {
+            if (error || !data.user) throw error ?? new Error('CI seed owner was not created.');
+            process.stdout.write(data.user.id);
+          }).catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+          )
+          echo "SEED_OWNER_USER_ID=$owner_id" >> "$GITHUB_ENV"
+      - name: Seed disposable data
+        run: pnpm db:seed
+      - name: Run integration tests
+        shell: bash
+        env:
+          STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+          RAZORPAY_TEST_KEY_SECRET: ${{ secrets.RAZORPAY_TEST_KEY_SECRET }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${STRIPE_TEST_SECRET_KEY:-}" && -z "${RAZORPAY_TEST_KEY_SECRET:-}" ]]; then
+            echo "Payment provider integration tests skipped: STRIPE_TEST_SECRET_KEY and RAZORPAY_TEST_KEY_SECRET are not configured."
+          fi
+          pnpm test
+      - name: Dump Supabase logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          supabase status || true
+          docker ps -a || true
+          for container in $(docker ps -aq --filter name=supabase); do
+            docker logs --tail 200 "$container" || true
+          done
+      - name: Stop disposable Supabase
+        if: always()
+        run: supabase stop --no-backup
+
+  # TODO: remove continue-on-error after this job is green for 5 consecutive runs.
+  e2e-web:
+    needs: checks
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - uses: supabase/setup-cli@v1
+        with: { version: latest }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @communityhub/web exec playwright install --with-deps chromium
+      - name: Start disposable Supabase
+        run: supabase start
+      - name: Export Supabase credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase status -o env > "$RUNNER_TEMP/supabase.env"
+          read_env() { sed -n "s/^$1=//p" "$RUNNER_TEMP/supabase.env" | tr -d '"'; }
+          echo "SUPABASE_URL=$(read_env API_URL)" >> "$GITHUB_ENV"
+          echo "SUPABASE_ANON_KEY=$(read_env ANON_KEY)" >> "$GITHUB_ENV"
+          echo "SUPABASE_SERVICE_ROLE_KEY=$(read_env SERVICE_ROLE_KEY)" >> "$GITHUB_ENV"
+      - run: pnpm db:reset
+      - name: Seed disposable E2E accounts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/seed-e2e-users.mjs > "$RUNNER_TEMP/e2e.env"
+          cat "$RUNNER_TEMP/e2e.env" >> "$GITHUB_ENV"
+      - run: pnpm build:web
+      - name: Start configured web server
+        shell: bash
+        run: |
+          pnpm --filter @communityhub/web start -p 3000 > "$RUNNER_TEMP/web.log" 2>&1 &
+          for attempt in {1..30}; do curl --fail --silent http://127.0.0.1:3000/login >/dev/null && exit 0; sleep 2; done
+          cat "$RUNNER_TEMP/web.log"
+          exit 1
+      - name: Start env-stripped web server
+        shell: bash
+        run: |
+          env -u NEXT_PUBLIC_SUPABASE_URL -u NEXT_PUBLIC_SUPABASE_ANON_KEY -u NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY \
+            pnpm --filter @communityhub/web start -p 3001 > "$RUNNER_TEMP/web-missing-env.log" 2>&1 &
+          for attempt in {1..30}; do curl --fail --silent http://127.0.0.1:3001/login >/dev/null && exit 0; sleep 2; done
+          cat "$RUNNER_TEMP/web-missing-env.log"
+          exit 1
+      - name: Run web E2E tests
+        env:
+          E2E_BASE_URL: http://127.0.0.1:3000
+          E2E_MISSING_ENV_URL: http://127.0.0.1:3001
+        run: pnpm e2e:web
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-e2e-artifacts
+          path: |
+            test-results/
+            playwright-report/
+            ${{ runner.temp }}/web*.log
+          if-no-files-found: ignore
+      - name: Stop disposable Supabase
+        if: always()
+        run: supabase stop --no-backup

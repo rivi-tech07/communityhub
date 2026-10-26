@@ -1,0 +1,31 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Europe/London
+    open-pull-requests-limit: 10
+    groups:
+      weekly-dependencies:
+        applies-to: version-updates
+        patterns: ['*']
+      security-updates:
+        applies-to: security-updates
+        patterns: ['*']
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Europe/London
+    groups:
+      weekly-actions:
+        applies-to: version-updates
+        patterns: ['*']
+      security-actions:
+        applies-to: security-updates
+        patterns: ['*']

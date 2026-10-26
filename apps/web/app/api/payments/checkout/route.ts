@@ -1,11 +1,30 @@
 import { NextResponse } from 'next/server';
 import { authenticate, getAdminClient } from '../../../lib/server-auth';
+import { requireFeature } from '../../../lib/feature-flags';
 import {
   createProviderPayment,
   isSupportedCheckoutCurrency,
   resolveProvider,
 } from '../../../lib/payments';
+
+async function releaseOrderStock(client: ReturnType<typeof getAdminClient>, orderId: string) {
+  const { data: reservations, error } = await client
+    .from('stock_reservations')
+    .select('id')
+    .eq('order_id', orderId)
+    .eq('status', 'held');
+  if (error) throw error;
+  for (const reservation of reservations ?? []) {
+    const result = await client.rpc('release_stock_reservation', {
+      p_reservation_id: reservation.id,
+    });
+    if (result.error) throw result.error;
+  }
+}
+
 export async function POST(request: Request) {
+  const disabled = await requireFeature(request, 'checkout');
+  if (disabled) return disabled;
   const result = await authenticate(request);
   if (result instanceof NextResponse) return result;
   const body = (await request.json().catch(() => null)) as {
@@ -113,6 +132,21 @@ export async function POST(request: Request) {
     .eq('idempotency_key', body.idempotencyKey)
     .maybeSingle();
   if (existing.data) return NextResponse.json({ transaction: existing.data, replay: true });
+  if (body.purpose === 'physical_order') {
+    const { error: reservationError } = await client.rpc('reserve_stock_for_order', {
+      p_order_id: body.referenceId,
+      p_ttl_seconds: 900,
+    });
+    if (reservationError)
+      return NextResponse.json(
+        {
+          error: reservationError.message.includes('Insufficient stock')
+            ? 'One or more items are out of stock.'
+            : 'Stock could not be reserved. Please try again.',
+        },
+        { status: 409 },
+      );
+  }
   let payment;
   try {
     payment = await createProviderPayment({
@@ -123,6 +157,7 @@ export async function POST(request: Request) {
       description,
     });
   } catch (error) {
+    if (body.purpose === 'physical_order') await releaseOrderStock(client, body.referenceId);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Payment provider is unavailable.' },
       { status: 503 },
@@ -145,6 +180,8 @@ export async function POST(request: Request) {
     })
     .select('*')
     .single();
+  if (error)
+    if (body.purpose === 'physical_order') await releaseOrderStock(client, body.referenceId);
   if (error)
     return NextResponse.json(
       { error: 'Payment transaction could not be recorded.' },

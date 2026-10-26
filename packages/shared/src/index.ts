@@ -1,13 +1,25 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
+export * from '../flags';
+export * from '../i18n';
+export * from './retention';
+
 export const AUTH_POLICY = {
   otpExpirySeconds: 300,
   resendCooldownSeconds: 60,
   recoveryExpirySeconds: 3600,
 } as const;
 
-export const ROLES = ['user', 'moderator', 'business_owner', 'employer', 'administrator', 'rider'] as const;
+export const ROLES = [
+  'user',
+  'moderator',
+  'business_owner',
+  'employer',
+  'administrator',
+  'rider',
+] as const;
 export type Role = (typeof ROLES)[number];
+export const MOBILE_IAP_ENABLED = false as const;
 export type PrivacySettings = {
   profile_visible: boolean;
   show_city: boolean;
@@ -272,6 +284,7 @@ export type Database = {
           comment_id: string | null;
           report_id: string | null;
           target_user_id: string | null;
+          role: string | null;
           reason: string | null;
           created_at: string;
         };
@@ -282,6 +295,7 @@ export type Database = {
           comment_id?: string | null;
           report_id?: string | null;
           target_user_id?: string | null;
+          role?: string | null;
           reason?: string | null;
         };
         Update: never;
@@ -426,9 +440,22 @@ export type Database = {
         Relationships: [];
       };
       product_catalog: {
-        Row: { id: string; name: string; slug: string; category: string; default_unit: string; is_active: boolean; created_at: string };
+        Row: {
+          id: string;
+          name: string;
+          slug: string;
+          category: string;
+          default_unit: string;
+          is_active: boolean;
+          created_at: string;
+        };
         Insert: Omit<Database['public']['Tables']['product_catalog']['Row'], 'id' | 'created_at'>;
-        Update: Partial<Pick<Database['public']['Tables']['product_catalog']['Row'], 'name' | 'slug' | 'category' | 'default_unit' | 'is_active'>>;
+        Update: Partial<
+          Pick<
+            Database['public']['Tables']['product_catalog']['Row'],
+            'name' | 'slug' | 'category' | 'default_unit' | 'is_active'
+          >
+        >;
         Relationships: [];
       };
       delivery_configs: {
@@ -869,6 +896,114 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      payment_events: {
+        Row: {
+          id: string;
+          provider: PaymentProvider;
+          provider_event_id: string;
+          event_type: string | null;
+          received_at: string;
+          processed_at: string | null;
+          status: 'received' | 'processed' | 'failed' | 'ignored';
+          attempts: number;
+          last_error: string | null;
+          payload: Record<string, unknown>;
+        };
+        Insert: {
+          provider: PaymentProvider;
+          provider_event_id: string;
+          event_type?: string | null;
+          processed_at?: string | null;
+          status?: 'received' | 'processed' | 'failed' | 'ignored';
+          attempts?: number;
+          last_error?: string | null;
+          payload: Record<string, unknown>;
+        };
+        Update: Partial<
+          Pick<
+            Database['public']['Tables']['payment_events']['Row'],
+            'event_type' | 'processed_at' | 'status' | 'attempts' | 'last_error' | 'payload'
+          >
+        >;
+        Relationships: [];
+      };
+      deletion_requests: {
+        Row: {
+          id: string;
+          user_id: string;
+          requested_at: string;
+          status: 'queued' | 'processing' | 'completed' | 'failed';
+          attempts: number;
+          last_error: string | null;
+          completed_at: string | null;
+        };
+        Insert: { user_id: string; status?: 'queued' | 'processing' | 'completed' | 'failed' };
+        Update: Partial<
+          Pick<
+            Database['public']['Tables']['deletion_requests']['Row'],
+            'status' | 'attempts' | 'last_error' | 'completed_at'
+          >
+        >;
+        Relationships: [];
+      };
+      outbox_messages: {
+        Row: {
+          id: string;
+          channel: 'email' | 'sms';
+          template: string;
+          recipient: string;
+          payload: Record<string, unknown>;
+          status: 'pending' | 'sent' | 'failed' | 'dead';
+          attempts: number;
+          next_attempt_at: string;
+          last_error: string | null;
+          created_at: string;
+          sent_at: string | null;
+          dedupe_key: string | null;
+        };
+        Insert: {
+          channel: 'email' | 'sms';
+          template: string;
+          recipient: string;
+          payload: Record<string, unknown>;
+          status?: 'pending' | 'sent' | 'failed' | 'dead';
+          attempts?: number;
+          next_attempt_at?: string;
+          last_error?: string | null;
+          sent_at?: string | null;
+          dedupe_key?: string | null;
+        };
+        Update: Partial<
+          Pick<
+            Database['public']['Tables']['outbox_messages']['Row'],
+            'status' | 'attempts' | 'next_attempt_at' | 'last_error' | 'sent_at'
+          >
+        >;
+        Relationships: [];
+      };
+      stock_reservations: {
+        Row: {
+          id: string;
+          order_id: string;
+          product_id: string;
+          quantity: number;
+          status: 'held' | 'committed' | 'released' | 'expired';
+          expires_at: string;
+          created_at: string;
+        };
+        Insert: {
+          order_id: string;
+          product_id: string;
+          quantity: number;
+          status?: 'held' | 'committed' | 'released' | 'expired';
+          expires_at: string;
+          created_at?: string;
+        };
+        Update: Partial<
+          Pick<Database['public']['Tables']['stock_reservations']['Row'], 'status' | 'expires_at'>
+        >;
+        Relationships: [];
+      };
       promotion_packages: {
         Row: {
           id: string;
@@ -940,55 +1075,155 @@ export type Database = {
           id: string;
           customer_id: string;
           rider_id: string | null;
-          status: 'pending' | 'assigned' | 'collecting' | 'out_for_delivery' | 'delivered' | 'cancelled';
+          status:
+            'pending' | 'assigned' | 'collecting' | 'out_for_delivery' | 'delivered' | 'cancelled';
           delivery_address: Record<string, unknown>;
           assigned_at: string | null;
           delivered_at: string | null;
           created_at: string;
           updated_at: string;
         };
-        Insert: Omit<Database['public']['Tables']['delivery_runs']['Row'], 'id' | 'created_at' | 'updated_at'> & { customer_id: string; delivery_address: Record<string, unknown> };
-        Update: Partial<Pick<Database['public']['Tables']['delivery_runs']['Row'], 'rider_id' | 'status' | 'delivery_address' | 'assigned_at' | 'delivered_at'>>;
+        Insert: Omit<
+          Database['public']['Tables']['delivery_runs']['Row'],
+          'id' | 'created_at' | 'updated_at'
+        > & { customer_id: string; delivery_address: Record<string, unknown> };
+        Update: Partial<
+          Pick<
+            Database['public']['Tables']['delivery_runs']['Row'],
+            'rider_id' | 'status' | 'delivery_address' | 'assigned_at' | 'delivered_at'
+          >
+        >;
         Relationships: [];
       };
       delivery_run_stops: {
-        Row: { id: string; run_id: string; business_id: string; order_id: string; stop_order: number; status: 'pending' | 'arrived' | 'picked_up' | 'cancelled'; picked_up_at: string | null };
+        Row: {
+          id: string;
+          run_id: string;
+          business_id: string;
+          order_id: string;
+          stop_order: number;
+          status: 'pending' | 'arrived' | 'picked_up' | 'cancelled';
+          picked_up_at: string | null;
+        };
         Insert: Omit<Database['public']['Tables']['delivery_run_stops']['Row'], 'id'>;
-        Update: Partial<Pick<Database['public']['Tables']['delivery_run_stops']['Row'], 'status' | 'picked_up_at'>>;
+        Update: Partial<
+          Pick<Database['public']['Tables']['delivery_run_stops']['Row'], 'status' | 'picked_up_at'>
+        >;
         Relationships: [];
       };
       delivery_proofs: {
-        Row: { id: string; run_id: string; stop_id: string | null; captured_by: string; proof_type: 'pickup_selfie' | 'pickup_items' | 'delivery_selfie'; storage_path: string; latitude: number | null; longitude: number | null; captured_at: string };
+        Row: {
+          id: string;
+          run_id: string;
+          stop_id: string | null;
+          captured_by: string;
+          proof_type: 'pickup_selfie' | 'pickup_items' | 'delivery_selfie';
+          storage_path: string;
+          latitude: number | null;
+          longitude: number | null;
+          captured_at: string;
+        };
         Insert: Omit<Database['public']['Tables']['delivery_proofs']['Row'], 'id' | 'captured_at'>;
         Update: never;
         Relationships: [];
       };
       feature_flags: {
-        Row: { key: string; enabled: boolean; description: string; updated_by: string | null; updated_at: string };
+        Row: {
+          key: string;
+          enabled: boolean;
+          description: string;
+          updated_by: string | null;
+          updated_at: string;
+        };
         Insert: Omit<Database['public']['Tables']['feature_flags']['Row'], 'updated_at'>;
-        Update: Partial<Pick<Database['public']['Tables']['feature_flags']['Row'], 'enabled' | 'description' | 'updated_by'>>;
+        Update: Partial<
+          Pick<
+            Database['public']['Tables']['feature_flags']['Row'],
+            'enabled' | 'description' | 'updated_by'
+          >
+        >;
         Relationships: [];
       };
     };
     Views: Record<string, never>;
     Functions: {
       is_user_restricted: { Args: { target_user: string }; Returns: boolean };
+      process_payment_event: {
+        Args: {
+          p_provider: PaymentProvider;
+          p_provider_event_id: string;
+          p_event_type: string;
+          p_provider_payment_id: string | null;
+          p_provider_order_id: string | null;
+          p_payload: Record<string, unknown>;
+        };
+        Returns: { outcome: string; duplicate: boolean; transaction_found: boolean }[];
+      };
+      reserve_stock_for_order: {
+        Args: { p_order_id: string; p_ttl_seconds?: number };
+        Returns: { product_id: string; quantity: number; expires_at: string }[];
+      };
+      commit_stock_reservations: {
+        Args: { p_order_id: string };
+        Returns: number;
+      };
+      reserve_stock_item: {
+        Args: {
+          p_order_id: string;
+          p_product_id: string;
+          p_quantity: number;
+          p_ttl?: string;
+        };
+        Returns: string;
+      };
+      release_stock_reservation: {
+        Args: { p_reservation_id: string };
+        Returns: boolean;
+      };
+      commit_stock_reservation: {
+        Args: { p_reservation_id: string };
+        Returns: boolean;
+      };
+      expire_stock_reservations: {
+        Args: { p_limit?: number };
+        Returns: number;
+      };
+      claim_deletion_request: {
+        Args: { p_lease?: string };
+        Returns: { id: string; user_id: string; status: 'processing'; attempts: number }[];
+      };
+      approve_community_membership: {
+        Args: { p_community_id: string; p_user_id: string };
+        Returns: Record<string, unknown>;
+      };
+      claim_outbox_messages: {
+        Args: { p_limit?: number; p_lease?: string };
+        Returns: Database['public']['Tables']['outbox_messages']['Row'][];
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
 };
 
-export type SupabaseConfig = { url: string; anonKey: string };
+export type SupabaseConfig = { url: string; anonKey: string; headers?: Record<string, string> };
+
+export * from './batch2-policy';
 
 export function getSupabaseConfig(env: Record<string, string | undefined>): SupabaseConfig | null {
   const url = env.NEXT_PUBLIC_SUPABASE_URL ?? env.EXPO_PUBLIC_SUPABASE_URL;
-  const anonKey = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+  const anonKey =
+    env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+    env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+    env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
   return url && anonKey ? { url, anonKey } : null;
 }
 
 export function createSupabaseClient(config: SupabaseConfig): SupabaseClient<Database> {
-  return createClient<Database>(config.url, config.anonKey);
+  return createClient<Database>(config.url, config.anonKey, {
+    global: config.headers ? { headers: config.headers } : undefined,
+  });
 }
 
 export function getCooldownRemaining(lastSentAt: number, now = Date.now()): number {
@@ -1005,6 +1240,72 @@ export function canManageRole(actorRoles: readonly Role[], targetRole: Role): bo
     actorRoles.includes('administrator') ||
     (targetRole === 'moderator' && actorRoles.includes('moderator'))
   );
+}
+
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type StructuredLogContext = {
+  requestId?: string;
+  userId?: string;
+  route?: string;
+  duration?: number;
+  [key: string]: unknown;
+};
+
+const REDACTED = '[REDACTED]';
+const sensitiveKeyPattern =
+  /(token|secret|password|authorization|cookie|api[_-]?key|dsn|phone|email|key)/i;
+const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+const bearerPattern = /\bBearer\s+[A-Z0-9._~-]+/gi;
+const phonePattern = /(?<!\w)\+?[\d][\d\s().-]{7,}\d(?!\w)/g;
+
+export function hashIdentifier(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `h${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+export function redactLogValue(value: unknown, key = ''): unknown {
+  if (sensitiveKeyPattern.test(key)) return REDACTED;
+  if (typeof value === 'string')
+    return value
+      .replace(bearerPattern, 'Bearer [REDACTED]')
+      .replace(emailPattern, REDACTED)
+      .replace(phonePattern, REDACTED);
+  if (Array.isArray(value)) return value.map((item) => redactLogValue(item));
+  if (value && typeof value === 'object')
+    return Object.fromEntries(
+      Object.entries(value).map(([entryKey, entryValue]) => [
+        entryKey,
+        redactLogValue(entryValue, entryKey),
+      ]),
+    );
+  return value;
+}
+
+export function createStructuredLogger(defaultContext: StructuredLogContext = {}) {
+  function write(level: LogLevel, message: string, context: StructuredLogContext = {}) {
+    const merged = redactLogValue({
+      level,
+      message,
+      requestId: context.requestId ?? defaultContext.requestId ?? 'unknown',
+      ...defaultContext,
+      ...context,
+    }) as Record<string, unknown>;
+    if (typeof merged.userId === 'string') merged.userId = hashIdentifier(merged.userId);
+    const line = JSON.stringify(merged);
+    if (level === 'error') console.error(line);
+    else if (level === 'warn') console.warn(line);
+    else console.log(line);
+  }
+  return {
+    debug: (message: string, context?: StructuredLogContext) => write('debug', message, context),
+    info: (message: string, context?: StructuredLogContext) => write('info', message, context),
+    warn: (message: string, context?: StructuredLogContext) => write('warn', message, context),
+    error: (message: string, context?: StructuredLogContext) => write('error', message, context),
+  };
 }
 
 export const designTokens = {

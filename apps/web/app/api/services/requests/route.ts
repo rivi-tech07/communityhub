@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { authenticate } from '../../../lib/server-auth';
+import { requireFeature } from '../../../lib/feature-flags';
 export async function POST(request: Request) {
+  const disabled = await requireFeature(request, 'service_enquiries');
+  if (disabled) return disabled;
   const result = await authenticate(request);
   if (result instanceof NextResponse) return result;
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;

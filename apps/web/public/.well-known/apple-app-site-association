@@ -1,0 +1,15 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["REPLACE_WITH_APPLE_TEAM_ID.com.communityhub.app"],
+        "components": [
+          {
+            "/": "/reset-password*",
+            "comment": "Open password recovery links in the CommunityHub app"
+          }
+        ]
+      }
+    ]
+  }
+}

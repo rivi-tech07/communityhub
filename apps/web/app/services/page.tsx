@@ -21,9 +21,7 @@ export default function ServicesPage() {
         <div>
           <p className="eyebrow">COMMUNITYHUB / SERVICES</p>
           <h1>Local services</h1>
-          <p className="muted">
-            Discover published providers and send an enquiry when you are signed in.
-          </p>
+          <p className="muted">Discover published providers and service details.</p>
         </div>
         <a className="back-link" href="/">
           Dashboard

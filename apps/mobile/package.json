@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@communityhub/shared": "workspace:*",
+    "@sentry/react-native": "^8.32.0",
     "@supabase/supabase-js": "^2.49.1",
     "expo": "^52.0.27",
     "expo-notifications": "~0.29.14",

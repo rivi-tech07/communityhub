@@ -114,7 +114,12 @@ export function verifyStripeSignature(
   const parts = Object.fromEntries(signature.split(',').map((part) => part.split('=')));
   const timestamp = Number(parts.t);
   const expected = createHmac('sha256', secretKey).update(`${timestamp}.${payload}`).digest('hex');
-  if (!timestamp || Math.abs(Date.now() / 1000 - timestamp) > toleranceSeconds || !parts.v1)
+  if (
+    !timestamp ||
+    Math.abs(Date.now() / 1000 - timestamp) > toleranceSeconds ||
+    !parts.v1 ||
+    parts.v1.length !== expected.length
+  )
     return false;
   return timingSafeEqual(Buffer.from(expected), Buffer.from(parts.v1));
 }

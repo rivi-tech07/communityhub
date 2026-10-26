@@ -1,0 +1,31 @@
+name: Retention dry run
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  retention-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Run retention dry runs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '## purge-soft-deleted' >> "$GITHUB_STEP_SUMMARY"
+          pnpm purge:soft-deleted | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '## purge-sample-data' >> "$GITHUB_STEP_SUMMARY"
+          pnpm purge:samples | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '## purge-audit-logs' >> "$GITHUB_STEP_SUMMARY"
+          pnpm purge:audit-logs | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "No purge was applied; this workflow intentionally uses dry-run defaults." >> "$GITHUB_STEP_SUMMARY"

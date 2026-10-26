@@ -1,12 +1,12 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { createStructuredLogger, type PaymentProvider } from '@communityhub/shared';
+import * as Sentry from '@sentry/nextjs';
 import { NextResponse } from 'next/server';
-import { getAdminClient } from '../../../../lib/server-auth';
 import { verifyWebhook } from '../../../../lib/payments';
-import type { PaymentProvider } from '@communityhub/shared';
-import { createHash } from 'node:crypto';
+import { getAdminClient } from '../../../../lib/server-auth';
 
 type WebhookObject = {
   [key: string]: unknown;
-  last_payment_error?: { code?: unknown; message?: unknown };
 };
 type WebhookEvent = {
   id?: unknown;
@@ -17,119 +17,79 @@ type WebhookEvent = {
 };
 
 export const runtime = 'nodejs';
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ provider: PaymentProvider }> },
 ) {
   const { provider } = await params;
+  const requestId = request.headers.get('x-request-id') ?? randomUUID();
+  const logger = createStructuredLogger({ requestId, route: `/api/payments/webhooks/${provider}` });
+  Sentry.setTag('request_id', requestId);
   if (provider !== 'stripe' && provider !== 'razorpay')
     return NextResponse.json({ error: 'Unsupported provider.' }, { status: 400 });
   const payload = await request.text();
   const signature =
     request.headers.get(provider === 'stripe' ? 'stripe-signature' : 'x-razorpay-signature') ?? '';
-  if (!verifyWebhook(provider, payload, signature))
+  if (!verifyWebhook(provider, payload, signature)) {
+    logger.warn('payment webhook rejected', {
+      provider,
+      provider_event_id: 'unknown',
+      event_type: 'unknown',
+      outcome: 'rejected_signature',
+    });
     return NextResponse.json({ error: 'Webhook signature is invalid.' }, { status: 400 });
-  const event = JSON.parse(payload) as WebhookEvent;
+  }
+  let event: WebhookEvent;
+  try {
+    event = JSON.parse(payload) as WebhookEvent;
+  } catch {
+    logger.warn('payment webhook rejected', {
+      provider,
+      provider_event_id: 'unknown',
+      event_type: 'unknown',
+      outcome: 'rejected_invalid_json',
+    });
+    return NextResponse.json({ error: 'Webhook payload is invalid.' }, { status: 400 });
+  }
   const type = String(event.type ?? '');
   const object =
     event.data?.object ?? event.payload?.payment?.entity ?? event.payload?.refund?.entity ?? {};
   const providerPaymentId = String(object.payment_intent ?? object.id ?? '');
   const providerOrderId = String(object.order_id ?? '');
-  const client = getAdminClient();
   const providerEventId = String(
     event.id ?? event.event ?? createHash('sha256').update(payload).digest('hex'),
   );
-  const audit = await client
-    .from('payment_webhook_events')
-    .insert({
+  try {
+    const { data, error } = await getAdminClient().rpc('process_payment_event', {
+      p_provider: provider,
+      p_provider_event_id: providerEventId,
+      p_event_type: type,
+      p_provider_payment_id: providerPaymentId || null,
+      p_provider_order_id: providerOrderId || null,
+      p_payload: event,
+    });
+    if (error) throw error;
+    const result = Array.isArray(data) ? data[0] : data;
+    const outcome = String(result?.outcome ?? 'processed');
+    logger.info('payment webhook processed', {
       provider,
       provider_event_id: providerEventId,
       event_type: type,
-      payload_hash: createHash('sha256').update(payload).digest('hex'),
-    })
-    .select('id')
-    .single();
-  if (audit.error?.code === '23505') return NextResponse.json({ received: true, duplicate: true });
-  const lookup =
-    providerPaymentId && providerPaymentId !== 'undefined'
-      ? client
-          .from('payment_transactions')
-          .select('*')
-          .eq('provider', provider)
-          .eq('provider_payment_id', providerPaymentId)
-          .maybeSingle()
-      : client
-          .from('payment_transactions')
-          .select('*')
-          .eq('provider', provider)
-          .eq('provider_order_id', providerOrderId)
-          .maybeSingle();
-  const { data: transaction } = await lookup;
-  if (!transaction) return NextResponse.json({ received: true, ignored: true });
-  const succeeded = type === 'payment_intent.succeeded' || type === 'payment.captured';
-  const failed = type === 'payment_intent.payment_failed' || type === 'payment.failed';
-  const refunded = type.includes('refunded') || type === 'refund.processed';
-  if (refunded) {
-    await client
-      .from('payment_transactions')
-      .update({ status: 'refunded', refund_amount_minor: transaction.amount_minor })
-      .eq('id', transaction.id);
-    return NextResponse.json({ received: true });
+      outcome,
+    });
+    return NextResponse.json({
+      received: true,
+      duplicate: Boolean(result?.duplicate),
+      ignored: outcome === 'ignored',
+    });
+  } catch {
+    logger.error('payment webhook failed', {
+      provider,
+      provider_event_id: providerEventId,
+      event_type: type,
+      outcome: 'failed',
+    });
+    return NextResponse.json({ error: 'Webhook processing failed.' }, { status: 500 });
   }
-  if (succeeded) {
-    const update = await client
-      .from('payment_transactions')
-      .update({
-        status: 'succeeded',
-        provider_payment_id: providerPaymentId || transaction.provider_payment_id,
-        provider_order_id: providerOrderId || transaction.provider_order_id,
-      })
-      .eq('id', transaction.id)
-      .neq('status', 'succeeded');
-    if (update.error)
-      return NextResponse.json({ error: 'Transaction update failed.' }, { status: 500 });
-    if (transaction.purpose === 'physical_order')
-      await client
-        .from('orders')
-        .update({ status: 'paid' })
-        .eq('id', transaction.reference_id)
-        .eq('status', 'pending_payment');
-    if (transaction.purpose === 'promotion') {
-      await client
-        .from('promotions')
-        .update({ transaction_id: transaction.id })
-        .eq('id', transaction.reference_id);
-      const { data: promotion } = await client
-        .from('promotions')
-        .select('approval_status,starts_at,expires_at')
-        .eq('id', transaction.reference_id)
-        .single();
-      if (promotion?.approval_status === 'approved' && new Date(promotion.expires_at) > new Date())
-        await client
-          .from('promotions')
-          .update({ entitlement_status: 'active' })
-          .eq('id', transaction.reference_id);
-    }
-  } else if (failed) {
-    await client
-      .from('payment_transactions')
-      .update({
-        status: 'failed',
-        failure_code: String(
-          object.last_payment_error?.code ?? object.error_code ?? 'provider_failure',
-        ),
-        failure_message: String(
-          object.last_payment_error?.message ?? object.error_description ?? 'Payment failed.',
-        ),
-      })
-      .eq('id', transaction.id)
-      .neq('status', 'succeeded');
-    if (transaction.purpose === 'physical_order')
-      await client
-        .from('orders')
-        .update({ status: 'cancelled' })
-        .eq('id', transaction.reference_id)
-        .eq('status', 'pending_payment');
-  }
-  return NextResponse.json({ received: true });
 }

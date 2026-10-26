@@ -1,0 +1,10 @@
+title = "CommunityHub gitleaks policy"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated build output and dependency caches are excluded; source and configuration remain scanned."
+paths = [
+  '''(^|/)(\.next|dist|node_modules|\.tsbuild)(/|$)'''
+]

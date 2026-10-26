@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { authenticate, getPublicClient } from '../../lib/server-auth';
-import { pageParams } from '../../lib/pagination';
+import { pageParams, paginationError } from '../../lib/pagination';
 export async function GET(request: Request) {
-  const { limit, cursor, query } = pageParams(request.url);
+  const pagination = pageParams(request.url);
+  if ('error' in pagination) return paginationError(pagination);
+  const { limit, cursor, query } = pagination;
   const params = new URL(request.url).searchParams;
   let builder = getPublicClient()
     .from('services')

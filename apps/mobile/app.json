@@ -9,20 +9,45 @@
     "ios": {
       "bundleIdentifier": "com.communityhub.app",
       "supportsTablet": true,
+      "associatedDomains": ["applinks:communityhub-lyart.vercel.app"],
       "infoPlist": {
         "NSUserTrackingUsageDescription": "CommunityHub does not track you across other companies' apps.",
         "NSPhotoLibraryUsageDescription": "CommunityHub uses your photo library when you choose an image.",
         "NSCameraUsageDescription": "CommunityHub uses your camera when you choose to take a photo.",
         "UIBackgroundModes": ["remote-notification"]
-      }
+      },
+      "buildNumber": "1000"
     },
     "android": {
       "package": "com.communityhub.app",
-      "permissions": ["CAMERA", "POST_NOTIFICATIONS", "READ_MEDIA_IMAGES"]
+      "permissions": ["CAMERA", "POST_NOTIFICATIONS", "READ_MEDIA_IMAGES"],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [
+            {
+              "scheme": "https",
+              "host": "communityhub-lyart.vercel.app",
+              "pathPrefix": "/reset-password"
+            }
+          ]
+        }
+      ],
+      "versionCode": 1000
     },
-    "plugins": ["expo-notifications"],
-    "notification": { "color": "#1D7958" },
-    "web": { "bundler": "metro" },
-    "extra": { "eas": { "projectId": "REPLACE_WITH_EAS_PROJECT_ID" } }
+    "plugins": ["expo-notifications", "@sentry/react-native/expo"],
+    "notification": {
+      "color": "#1D7958"
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+      }
+    }
   }
 }

@@ -1,77 +1,1823 @@
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { Image, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { AUTH_POLICY, getCooldownRemaining } from '@communityhub/shared';
+import {
+  Image,
+  Linking,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import {
+  AUTH_POLICY,
+  createTranslator,
+  getCooldownRemaining,
+  resolveLocale,
+  type Locale,
+  type Translator,
+} from '@communityhub/shared';
+import * as Sentry from '@sentry/react-native';
 import { supabase } from './src/supabase';
+import { MOBILE_SESSION_ID } from './src/supabase';
+import { MobilePromotionEntry } from './src/mobile-promotions';
 
 type AuthMode = 'email' | 'phone';
-const colors = { ink: '#183129', muted: '#73817B', primary: '#1D7958', mint: '#DFF3E8', paper: '#FBFDFA', border: '#E5EBE7' };
+if (process.env.EXPO_PUBLIC_SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+    release: process.env.EXPO_PUBLIC_GIT_SHA ?? process.env.EAS_BUILD_GIT_COMMIT_HASH ?? 'unknown',
+    enableNative: true,
+    sendDefaultPii: false,
+  });
+  Sentry.setTag('session_id', MOBILE_SESSION_ID);
+}
+const colors = {
+  ink: '#183129',
+  muted: '#53665B',
+  primary: '#1D7958',
+  mint: '#DFF3E8',
+  paper: '#FBFDFA',
+  border: '#E5EBE7',
+};
 
 export default function App() {
   const [session, setSession] = useState<{ access_token: string } | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>('email');
   const [registering, setRegistering] = useState(false);
-  const [identifier, setIdentifier] = useState(''); const [password, setPassword] = useState(''); const [otp, setOtp] = useState('');
-  const [otpSentAt, setOtpSentAt] = useState<number | null>(null); const [cooldown, setCooldown] = useState(0);
-  const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
-  const [profile, setProfile] = useState({ display_name: '', biography: '', country: '', city: '', preferred_language: 'en' });
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [otp, setOtp] = useState('');
+  const [otpSentAt, setOtpSentAt] = useState<number | null>(null);
+  const [cooldown, setCooldown] = useState(0);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [localeOverride, setLocaleOverride] = useState<Locale | null>(null);
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [recoveryPassword, setRecoveryPassword] = useState('');
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState('');
+  const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [profile, setProfile] = useState({
+    display_name: '',
+    biography: '',
+    country: '',
+    city: '',
+    preferred_language: 'en-GB',
+  });
 
-  useEffect(() => { if (!supabase) return; supabase.auth.getSession().then(({ data }) => setSession(data.session)); const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession)); return () => listener.subscription.unsubscribe(); }, []);
-  useEffect(() => { if (!otpSentAt) return; const timer = setInterval(() => setCooldown(getCooldownRemaining(otpSentAt)), 1000); return () => clearInterval(timer); }, [otpSentAt]);
+  const locale = localeOverride ?? resolveLocale(profile.preferred_language);
+  const t = createTranslator(locale);
 
-  async function submitAuth() {
-    setBusy(true); setError(''); setMessage('');
-    if (!supabase) { setError('Authentication is not configured. Add Supabase variables first.'); setBusy(false); return; }
+  async function handleRecoveryUrl(url: string | null) {
+    if (!supabase || !url) return;
+    let parsed: URL;
     try {
-      if (authMode === 'email') {
-        const result = registering ? await supabase.auth.signUp({ email: identifier, password }) : await supabase.auth.signInWithPassword({ email: identifier, password });
-        if (result.error) throw result.error;
-        setMessage(registering && !result.data.session ? 'Registration accepted. Check your email to verify your address.' : 'Signed in.');
-      } else if (!otpSentAt) {
-        const { error: otpError } = await supabase.auth.signInWithOtp({ phone: identifier, options: { shouldCreateUser: registering } });
-        if (otpError) throw otpError;
-        const now = Date.now(); setOtpSentAt(now); setCooldown(AUTH_POLICY.resendCooldownSeconds); setMessage('OTP request accepted by Supabase. Enter the code only after it arrives.');
-      } else {
-        const { error: verifyError } = await supabase.auth.verifyOtp({ phone: identifier, token: otp, type: 'sms' });
-        if (verifyError) throw verifyError;
-        setMessage('Phone verified and signed in.');
-      }
-    } catch (authError) { setError(normalizeError(authError)); } finally { setBusy(false); }
+      parsed = new URL(url);
+    } catch {
+      setRecoveryError(t('auth.invalidRecoveryLink'));
+      return;
+    }
+    const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+    const accessToken = parsed.searchParams.get('access_token') ?? hashParams.get('access_token');
+    const refreshToken =
+      parsed.searchParams.get('refresh_token') ?? hashParams.get('refresh_token');
+    const recoveryType = parsed.searchParams.get('type') ?? hashParams.get('type');
+    if (!accessToken || !refreshToken || recoveryType !== 'recovery') return;
+    const { error: sessionError } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+    if (sessionError) {
+      setRecoveryError(sessionError.message);
+      return;
+    }
+    setRecoveryError('');
+    setRecoveryMessage('');
+    setRecoveryPassword('');
+    setRecoveryMode(true);
   }
 
-  async function refreshSession() { if (!supabase) return; const { data, error: refreshError } = await supabase.auth.refreshSession(); setError(refreshError?.message ?? ''); setMessage(refreshError ? '' : 'Session refreshed.'); setSession(data.session); }
-  async function signOut() { if (!supabase) return; await supabase.auth.signOut(); setSession(null); }
-  async function deleteAccount() { if (!supabase || !session) return; const apiUrl = process.env.EXPO_PUBLIC_API_URL; if (!apiUrl) { setError('Account deletion requires EXPO_PUBLIC_API_URL for the server endpoint.'); return; } setBusy(true); const response = await fetch(`${apiUrl}/api/account`, { method: 'DELETE', headers: { Authorization: `Bearer ${session.access_token}` } }); if (!response.ok) { setError('Account deletion failed. Please try again.'); setBusy(false); return; } await signOut(); setBusy(false); }
-  if (session) return <Home profile={profile} setProfile={setProfile} onRefresh={refreshSession} onSignOut={signOut} onDelete={deleteAccount} message={message} error={error} />;
-  return <AuthScreen mode={authMode} registering={registering} identifier={identifier} password={password} otp={otp} otpSentAt={otpSentAt} cooldown={cooldown} message={message} error={error} busy={busy} onMode={(mode) => { setAuthMode(mode); setOtpSentAt(null); setOtp(''); setMessage(''); setError(''); }} onRegister={() => { setRegistering(!registering); setOtpSentAt(null); setMessage(''); setError(''); }} onIdentifier={setIdentifier} onPassword={setPassword} onOtp={setOtp} onSubmit={submitAuth} onResend={() => { setOtpSentAt(null); setOtp(''); }} />;
+  async function loadProfile() {
+    if (!supabase) return;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase
+      .from('profiles')
+      .select('display_name,biography,country,city,preferred_language')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (data) setProfile((current) => ({ ...current, ...data }));
+  }
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      if (data.session) void loadProfile();
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      if (nextSession) void loadProfile();
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+  useEffect(() => {
+    if (!supabase) return;
+    Linking.getInitialURL()
+      .then(handleRecoveryUrl)
+      .catch(() => undefined);
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      void handleRecoveryUrl(url);
+    });
+    return () => subscription.remove();
+  }, []);
+  useEffect(() => {
+    if (!otpSentAt) return;
+    const timer = setInterval(() => setCooldown(getCooldownRemaining(otpSentAt)), 1000);
+    return () => clearInterval(timer);
+  }, [otpSentAt]);
+
+  async function submitAuth() {
+    setBusy(true);
+    setError('');
+    setMessage('');
+    if (!supabase) {
+      setError(t('auth.authNotConfigured'));
+      setBusy(false);
+      return;
+    }
+    try {
+      if (authMode === 'email') {
+        const result = registering
+          ? await supabase.auth.signUp({ email: identifier, password })
+          : await supabase.auth.signInWithPassword({ email: identifier, password });
+        if (result.error) throw result.error;
+        setMessage(
+          registering && !result.data.session ? t('auth.registrationAccepted') : t('auth.signedIn'),
+        );
+      } else if (!otpSentAt) {
+        const { error: otpError } = await supabase.auth.signInWithOtp({
+          phone: identifier,
+          options: { shouldCreateUser: registering },
+        });
+        if (otpError) throw otpError;
+        const now = Date.now();
+        setOtpSentAt(now);
+        setCooldown(AUTH_POLICY.resendCooldownSeconds);
+        setMessage(t('auth.otpAccepted'));
+      } else {
+        const { error: verifyError } = await supabase.auth.verifyOtp({
+          phone: identifier,
+          token: otp,
+          type: 'sms',
+        });
+        if (verifyError) throw verifyError;
+        setMessage(t('auth.phoneVerified'));
+      }
+    } catch (authError) {
+      setError(normalizeError(authError, t));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshSession() {
+    if (!supabase) return;
+    const { data, error: refreshError } = await supabase.auth.refreshSession();
+    setError(refreshError?.message ?? '');
+    setMessage(refreshError ? '' : t('auth.sessionRefreshed'));
+    setSession(data.session);
+  }
+  async function signOut() {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setSession(null);
+  }
+  async function deleteAccount() {
+    if (!supabase || !session) return;
+    const apiUrl = process.env.EXPO_PUBLIC_API_URL;
+    if (!apiUrl) {
+      setError(t('auth.accountDeletionConfig'));
+      return;
+    }
+    setBusy(true);
+    const response = await fetch(`${apiUrl}/api/account`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        'x-session-id': MOBILE_SESSION_ID,
+      },
+    });
+    if (!response.ok) {
+      setError(t('auth.accountDeletionFailed'));
+      setBusy(false);
+      return;
+    }
+    await signOut();
+    setBusy(false);
+  }
+  async function updateRecoveryPassword() {
+    if (!supabase) return;
+    setRecoveryBusy(true);
+    setRecoveryError('');
+    setRecoveryMessage('');
+    const { error: updateError } = await supabase.auth.updateUser({ password: recoveryPassword });
+    if (updateError) setRecoveryError(updateError.message);
+    else {
+      setRecoveryMessage(t('auth.passwordUpdated'));
+      setRecoveryPassword('');
+      setRecoveryMode(false);
+      await supabase.auth.signOut();
+      setSession(null);
+    }
+    setRecoveryBusy(false);
+  }
+  if (recoveryMode)
+    return (
+      <RecoveryScreen
+        password={recoveryPassword}
+        busy={recoveryBusy}
+        error={recoveryError}
+        message={recoveryMessage}
+        t={t}
+        onPassword={setRecoveryPassword}
+        onSubmit={updateRecoveryPassword}
+      />
+    );
+  if (session)
+    return (
+      <Home
+        profile={profile}
+        setProfile={setProfile}
+        onRefresh={refreshSession}
+        onSignOut={signOut}
+        onDelete={deleteAccount}
+        message={message}
+        error={error}
+        t={t}
+        locale={locale}
+        onLocaleOverride={setLocaleOverride}
+      />
+    );
+  return (
+    <AuthScreen
+      mode={authMode}
+      registering={registering}
+      identifier={identifier}
+      password={password}
+      otp={otp}
+      otpSentAt={otpSentAt}
+      cooldown={cooldown}
+      message={message}
+      error={error}
+      t={t}
+      busy={busy}
+      onMode={(mode) => {
+        setAuthMode(mode);
+        setOtpSentAt(null);
+        setOtp('');
+        setMessage('');
+        setError('');
+      }}
+      onRegister={() => {
+        setRegistering(!registering);
+        setOtpSentAt(null);
+        setMessage('');
+        setError('');
+      }}
+      onIdentifier={setIdentifier}
+      onPassword={setPassword}
+      onOtp={setOtp}
+      onSubmit={submitAuth}
+      onResend={() => {
+        setOtpSentAt(null);
+        setOtp('');
+      }}
+    />
+  );
 }
 
-function AuthScreen(props: { mode: AuthMode; registering: boolean; identifier: string; password: string; otp: string; otpSentAt: number | null; cooldown: number; message: string; error: string; busy: boolean; onMode: (mode: AuthMode) => void; onRegister: () => void; onIdentifier: (value: string) => void; onPassword: (value: string) => void; onOtp: (value: string) => void; onSubmit: () => void; onResend: () => void }) {
-  return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.auth}><View style={styles.logo}><Text>✦</Text></View><Text style={styles.kicker}>COMMUNITYHUB</Text><Text style={styles.title}>{props.registering ? 'Join your community' : 'Welcome back'}</Text><Text style={styles.body}>Use a verified identity to keep the community safe.</Text><View style={styles.modeRow}><TouchableOpacity style={props.mode === 'email' ? styles.modeActive : styles.mode} onPress={() => props.onMode('email')}><Text>Email</Text></TouchableOpacity><TouchableOpacity style={props.mode === 'phone' ? styles.modeActive : styles.mode} onPress={() => props.onMode('phone')}><Text>Phone / SMS</Text></TouchableOpacity></View><Text style={styles.label}>{props.mode === 'email' ? 'EMAIL ADDRESS' : 'PHONE NUMBER'}</Text><TextInput autoCapitalize="none" keyboardType={props.mode === 'email' ? 'email-address' : 'phone-pad'} placeholder={props.mode === 'email' ? 'you@example.com' : '+91 98765 43210'} placeholderTextColor="#9AA69F" value={props.identifier} onChangeText={props.onIdentifier} style={styles.input} /><Text style={styles.label}>{props.mode === 'phone' && props.otpSentAt ? 'SMS CODE' : 'PASSWORD'}</Text>{props.mode === 'phone' && props.otpSentAt ? <><TextInput keyboardType="number-pad" autoComplete="sms-otp" placeholder="123456" placeholderTextColor="#9AA69F" value={props.otp} onChangeText={props.onOtp} style={styles.input} /><Text style={styles.cooldown}>{props.cooldown ? `Resend in ${props.cooldown}s` : 'You can resend'}</Text></> : <TextInput secureTextEntry placeholder="At least 8 characters" placeholderTextColor="#9AA69F" value={props.password} onChangeText={props.onPassword} style={styles.input} />}{props.mode === 'phone' && props.otpSentAt && !props.cooldown && <TouchableOpacity onPress={props.onResend}><Text style={styles.link}>Resend code</Text></TouchableOpacity>}<Button label={props.busy ? 'Working…' : props.otpSentAt ? 'Verify code' : props.registering ? 'Create account' : 'Sign in'} onPress={props.onSubmit} /><Text style={styles.error}>{props.error}</Text><Text style={styles.message}>{props.message}</Text><TouchableOpacity onPress={props.onRegister}><Text style={styles.link}>{props.registering ? 'Already have an account?' : 'Create an account'}</Text></TouchableOpacity><Text style={styles.message}>Password recovery is available from the web dashboard.</Text></ScrollView><StatusBar style="dark" /></SafeAreaView>;
+function RecoveryScreen(props: {
+  password: string;
+  busy: boolean;
+  error: string;
+  message: string;
+  t: Translator;
+  onPassword: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.auth}>
+        <View style={styles.logo}>
+          <Text>✦</Text>
+        </View>
+        <Text style={styles.kicker}>{props.t('auth.kicker')}</Text>
+        <Text style={styles.title}>{props.t('auth.resetTitle')}</Text>
+        <Text style={styles.body}>{props.t('auth.resetSubtitle')}</Text>
+        <Text style={styles.label}>{props.t('auth.newPassword')}</Text>
+        <TextInput
+          secureTextEntry
+          minLength={8}
+          placeholder={props.t('auth.placeholderPassword')}
+          placeholderTextColor="#5F7067"
+          value={props.password}
+          onChangeText={props.onPassword}
+          accessibilityLabel={props.t('auth.newPassword')}
+          style={styles.input}
+        />
+        <Button
+          label={props.busy ? props.t('auth.working') : props.t('auth.updatePassword')}
+          onPress={props.onSubmit}
+        />
+        <Text accessibilityLiveRegion="assertive" style={styles.error}>
+          {props.error}
+        </Text>
+        <Text accessibilityLiveRegion="polite" style={styles.message}>
+          {props.message}
+        </Text>
+      </ScrollView>
+      <StatusBar style="dark" />
+    </SafeAreaView>
+  );
 }
 
-function Home({ profile, setProfile, onRefresh, onSignOut, onDelete, message, error }: { profile: { display_name: string; biography: string; country: string; city: string; preferred_language: string }; setProfile: (profile: { display_name: string; biography: string; country: string; city: string; preferred_language: string }) => void; onRefresh: () => void; onSignOut: () => void; onDelete: () => void; message: string; error: string }) {
+function AuthScreen(props: {
+  mode: AuthMode;
+  registering: boolean;
+  identifier: string;
+  password: string;
+  otp: string;
+  otpSentAt: number | null;
+  cooldown: number;
+  message: string;
+  error: string;
+  t: Translator;
+  busy: boolean;
+  onMode: (mode: AuthMode) => void;
+  onRegister: () => void;
+  onIdentifier: (value: string) => void;
+  onPassword: (value: string) => void;
+  onOtp: (value: string) => void;
+  onSubmit: () => void;
+  onResend: () => void;
+}) {
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.auth}>
+        <View style={styles.logo}>
+          <Text>✦</Text>
+        </View>
+        <Text style={styles.kicker}>{props.t('auth.kicker')}</Text>
+        <Text style={styles.title}>
+          {props.t(props.registering ? 'auth.join' : 'auth.welcome')}
+        </Text>
+        <Text style={styles.body}>{props.t('auth.safeIdentity')}</Text>
+        <View style={styles.modeRow}>
+          <TouchableOpacity
+            accessibilityRole="tab"
+            accessibilityState={{ selected: props.mode === 'email' }}
+            style={props.mode === 'email' ? styles.modeActive : styles.mode}
+            onPress={() => props.onMode('email')}
+          >
+            <Text>{props.t('auth.email')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="tab"
+            accessibilityState={{ selected: props.mode === 'phone' }}
+            style={props.mode === 'phone' ? styles.modeActive : styles.mode}
+            onPress={() => props.onMode('phone')}
+          >
+            <Text>{props.t('auth.phoneSms')}</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.label}>
+          {props.t(props.mode === 'email' ? 'auth.emailAddress' : 'auth.phoneNumber')}
+        </Text>
+        <TextInput
+          autoCapitalize="none"
+          keyboardType={props.mode === 'email' ? 'email-address' : 'phone-pad'}
+          placeholder={props.t(
+            props.mode === 'email' ? 'auth.placeholderEmail' : 'auth.placeholderPhone',
+          )}
+          placeholderTextColor="#5F7067"
+          value={props.identifier}
+          onChangeText={props.onIdentifier}
+          accessibilityLabel={props.t(
+            props.mode === 'email' ? 'auth.emailAddress' : 'auth.phoneNumber',
+          )}
+          accessibilityHint={props.t('auth.enterIdentityHint')}
+          style={styles.input}
+        />
+        <Text style={styles.label}>
+          {props.t(props.mode === 'phone' && props.otpSentAt ? 'auth.smsCode' : 'auth.password')}
+        </Text>
+        {props.mode === 'phone' && props.otpSentAt ? (
+          <>
+            <TextInput
+              keyboardType="number-pad"
+              autoComplete="sms-otp"
+              placeholder={props.t('auth.placeholderOtp')}
+              placeholderTextColor="#5F7067"
+              value={props.otp}
+              onChangeText={props.onOtp}
+              accessibilityLabel={props.t('auth.smsCode')}
+              accessibilityHint={props.t('auth.enterCodeHint')}
+              style={styles.input}
+            />
+            <Text style={styles.cooldown}>
+              {props.cooldown
+                ? props.t('auth.resendIn', { seconds: props.cooldown })
+                : props.t('auth.youCanResend')}
+            </Text>
+          </>
+        ) : (
+          <TextInput
+            secureTextEntry
+            placeholder={props.t('auth.placeholderPassword')}
+            placeholderTextColor="#5F7067"
+            value={props.password}
+            onChangeText={props.onPassword}
+            accessibilityLabel={props.t('auth.password')}
+            accessibilityHint={props.t('auth.enterPasswordHint')}
+            style={styles.input}
+          />
+        )}
+        {props.mode === 'phone' && props.otpSentAt && !props.cooldown && (
+          <TouchableOpacity style={styles.linkButton} onPress={props.onResend}>
+            <Text style={styles.link}>{props.t('auth.resendCode')}</Text>
+          </TouchableOpacity>
+        )}
+        <Button
+          label={
+            props.busy
+              ? props.t('auth.working')
+              : props.otpSentAt
+                ? props.t('auth.verifyCode')
+                : props.registering
+                  ? props.t('auth.createAccount')
+                  : props.t('auth.signIn')
+          }
+          onPress={props.onSubmit}
+        />
+        <Text accessibilityLiveRegion="assertive" style={styles.error}>
+          {props.error}
+        </Text>
+        <Text accessibilityLiveRegion="polite" style={styles.message}>
+          {props.message}
+        </Text>
+        <TouchableOpacity style={styles.linkButton} onPress={props.onRegister}>
+          <Text style={styles.link}>
+            {props.t(props.registering ? 'auth.alreadyAccount' : 'auth.createAccountLink')}
+          </Text>
+        </TouchableOpacity>
+        <Text style={styles.message}>{props.t('auth.passwordRecovery')}</Text>
+      </ScrollView>
+      <StatusBar style="dark" />
+    </SafeAreaView>
+  );
+}
+
+function Home({
+  profile,
+  setProfile,
+  onRefresh,
+  onSignOut,
+  onDelete,
+  message,
+  error,
+  t,
+  locale,
+  onLocaleOverride,
+}: {
+  profile: {
+    display_name: string;
+    biography: string;
+    country: string;
+    city: string;
+    preferred_language: string;
+  };
+  setProfile: (profile: {
+    display_name: string;
+    biography: string;
+    country: string;
+    city: string;
+    preferred_language: string;
+  }) => void;
+  onRefresh: () => void;
+  onSignOut: () => void;
+  onDelete: () => void;
+  message: string;
+  error: string;
+  t: Translator;
+  locale: Locale;
+  onLocaleOverride: (locale: Locale | null) => void;
+}) {
   const [tab, setTab] = useState<'home' | 'post' | 'jobs' | 'shop' | 'profile'>('home');
-  async function saveProfile() { if (!supabase) return; const { data: { user } } = await supabase.auth.getUser(); if (!user) return; const { error: saveError } = await supabase.from('profiles').update(profile).eq('id', user.id); if (saveError) return; }
-  return <SafeAreaView style={styles.safe}><View style={styles.appShell}><View style={styles.appHeader}><View><Text style={styles.brand}>Community<Text style={styles.brandAccent}>Hub</Text></Text><Text style={styles.headerSub}>{tab === 'home' ? 'Your local community' : tab === 'shop' ? 'Local marketplace' : tab === 'jobs' ? 'Opportunities nearby' : tab === 'post' ? 'Share with your community' : 'Your account'}</Text></View><View style={headerStyles.actions}><TouchableOpacity style={headerStyles.action}><Text style={headerStyles.actionText}>⌕</Text></TouchableOpacity><TouchableOpacity style={headerStyles.action}><Text style={headerStyles.actionText}>♧</Text><View style={headerStyles.dot} /></TouchableOpacity><View style={styles.headerAvatar}><Text style={styles.avatarText}>{(profile.display_name || 'Y').slice(0, 1).toUpperCase()}</Text></View></View></View><ScrollView contentContainerStyle={styles.home}>{tab === 'home' && <HomeTab onTab={setTab} />}{tab === 'post' && <PostTab />}{tab === 'jobs' && <JobsTab />}{tab === 'shop' && <ShopTab />}{tab === 'profile' && <ProfileTab profile={profile} setProfile={setProfile} onSave={saveProfile} onRefresh={onRefresh} onSignOut={onSignOut} onDelete={onDelete} message={message} error={error} />}</ScrollView><View style={styles.tabBar}>{([['home', '⌂', 'Home'], ['post', '+', 'Post'], ['jobs', '▣', 'Jobs'], ['shop', '🛒', 'Shop'], ['profile', '○', 'Profile']] as const).map(([key, icon, label]) => <TouchableOpacity key={key} style={styles.tabItem} onPress={() => setTab(key)}><Text style={[styles.tabIcon, tab === key && styles.tabSelected]}>{icon}</Text><Text style={[styles.tabLabel, tab === key && styles.tabSelected]}>{label}</Text>{tab === key && <View style={styles.tabDot} />}</TouchableOpacity>)}</View></View></SafeAreaView>;
+  async function saveProfile() {
+    if (!supabase) return;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error: saveError } = await supabase.from('profiles').update(profile).eq('id', user.id);
+    if (saveError) return;
+  }
+  return (
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.appShell}>
+        <View style={styles.appHeader}>
+          <View>
+            <Text style={styles.brand}>
+              Community<Text style={styles.brandAccent}>Hub</Text>
+            </Text>
+            <Text style={styles.headerSub}>
+              {tab === 'home'
+                ? t('home.localCommunity')
+                : tab === 'shop'
+                  ? t('home.marketplace')
+                  : tab === 'jobs'
+                    ? t('home.opportunities')
+                    : tab === 'post'
+                      ? t('home.share')
+                      : t('home.account')}
+            </Text>
+          </View>
+          <View style={headerStyles.actions}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={t('home.search')}
+              style={headerStyles.action}
+            >
+              <Text style={headerStyles.actionText}>⌕</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={t('home.notifications')}
+              style={headerStyles.action}
+            >
+              <Text style={headerStyles.actionText}>♧</Text>
+              <View style={headerStyles.dot} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={t('home.language')}
+              style={headerStyles.languageAction}
+              onPress={() => onLocaleOverride(locale === 'gu' ? 'en-GB' : 'gu')}
+            >
+              <Text style={headerStyles.languageText}>
+                {locale === 'gu' ? t('home.english') : t('home.gujarati')}
+              </Text>
+            </TouchableOpacity>
+            <View style={styles.headerAvatar}>
+              <Text style={styles.avatarText}>
+                {(profile.display_name || 'Y').slice(0, 1).toUpperCase()}
+              </Text>
+            </View>
+          </View>
+        </View>
+        <ScrollView contentContainerStyle={styles.home}>
+          {tab === 'home' && <HomeTab onTab={setTab} />}
+          {tab === 'post' && <PostTab />}
+          {tab === 'jobs' && <JobsTab />}
+          {tab === 'shop' && <ShopTab />}
+          {tab === 'profile' && (
+            <ProfileTab
+              profile={profile}
+              setProfile={setProfile}
+              onSave={saveProfile}
+              onRefresh={onRefresh}
+              onSignOut={onSignOut}
+              onDelete={onDelete}
+              message={message}
+              error={error}
+              t={t}
+            />
+          )}
+        </ScrollView>
+        <View style={styles.tabBar}>
+          {[
+            ['home', '⌂', t('home.homeTab')],
+            ['post', '+', t('home.postTab')],
+            ['jobs', '▣', t('home.jobsTab')],
+            ['shop', '🛒', t('home.shopTab')],
+            ['profile', '○', t('home.profileTab')],
+          ].map(([key, icon, label]) => (
+            <TouchableOpacity
+              key={key}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: tab === key }}
+              style={styles.tabItem}
+              onPress={() => setTab(key as AppTab)}
+            >
+              <Text style={[styles.tabIcon, tab === key && styles.tabSelected]}>{icon}</Text>
+              <Text style={[styles.tabLabel, tab === key && styles.tabSelected]}>{label}</Text>
+              {tab === key && <View style={styles.tabDot} />}
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    </SafeAreaView>
+  );
 }
 
 type AppTab = 'home' | 'post' | 'jobs' | 'shop' | 'profile';
-const headerStyles = StyleSheet.create({ actions: { flexDirection: 'row', alignItems: 'center', gap: 9 }, action: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center', position: 'relative' }, actionText: { color: colors.ink, fontSize: 23, fontWeight: '700' }, dot: { position: 'absolute', top: 3, right: 3, width: 7, height: 7, borderRadius: 4, backgroundColor: '#F47721' } });
-function SectionTitle({ title, action, onPress }: { title: string; action?: string; onPress?: () => void }) { return <View style={styles.sectionTitle}><Text style={styles.sectionHeading}>{title}</Text>{action && <TouchableOpacity onPress={onPress}><Text style={styles.sectionAction}>{action} ›</Text></TouchableOpacity>}</View>; }
-function HomeTab({ onTab }: { onTab: (tab: AppTab) => void }) { const stories = [['+', 'Your story', null], ['👩🏽', 'Neighbors', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=160&q=80'], ['🥬', 'Food', 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=160&q=80'], ['🧰', 'Jobs', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=160&q=80'], ['🏪', 'Stores', 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=160&q=80']]; return <><View style={styles.storyRow}>{stories.map(([icon, label, image]) => <TouchableOpacity key={label} style={styles.story} onPress={() => label === 'Jobs' ? onTab('jobs') : label === 'Food' || label === 'Stores' ? onTab('shop') : onTab('post')}><View style={styles.storyCircle}>{image ? <Image source={{ uri: image }} style={styles.storyImage} /> : <Text style={styles.storyIcon}>{icon}</Text>}</View><Text style={styles.storyLabel}>{label}</Text></TouchableOpacity>)}</View><View style={styles.card}><View style={styles.postHeader}><View style={styles.avatar}><Text>AM</Text></View><View style={styles.postAuthor}><Text style={styles.cardTitle}>Arjun Mehta</Text><Text style={styles.mutedSmall}>Riverside · 2h ago</Text></View><Text style={styles.more}>•••</Text></View><Text style={styles.postText}>Beautiful morning in our community park! Grateful for these amazing people 🧡</Text><Image source={{ uri: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=900&q=85' }} style={styles.feedImage} /><Text style={styles.sampleTag}>SAMPLE POST</Text><View style={styles.postActions}><Text style={styles.actionLike}>♥ 128</Text><Text>◯ 24</Text><Text>↗ Share</Text><Text>♡</Text></View></View><View style={styles.reelCard}><Image source={{ uri: 'https://images.unsplash.com/photo-1543353071-10c8ba85a904?w=900&q=85' }} style={styles.reelImage} /><View style={styles.play}><Text>▶</Text></View><Text style={styles.reelDuration}>0:28</Text><Text style={styles.reelText}>Quick & healthy meal for busy days 🌿</Text><View style={styles.postActions}><Text style={styles.actionLike}>♥ 342</Text><Text>◯ 56</Text><Text>↗</Text></View></View><View style={styles.splitGrid}><View style={[styles.miniPanel, styles.jobsPanel]}><SectionTitle title="Local jobs" action="View all" onPress={() => onTab('jobs')} /><JobRow title="Cafe team member" meta="Part-time · Riverside" /><JobRow title="Delivery driver" meta="Full-time · Westside" /></View><View style={[styles.miniPanel, styles.shopPanel]}><SectionTitle title="Fresh groceries" action="View all" onPress={() => onTab('shop')} /><Image source={{ uri: 'https://images.unsplash.com/photo-1610348725531-843dff563e2c?w=700&q=85' }} style={styles.groceryImage} /><Text style={styles.storeName}>Green Valley Store</Text><ProductRow name="Fresh tomatoes" price="$2.99" emoji="🍅" /><ProductRow name="Bananas" price="$1.49" emoji="🍌" /></View></View></>; }
-function PostTab() { return <><Text style={styles.pageTitle}>Create a post</Text><Text style={styles.body}>Share an update, photo, short reel, job, or local promotion.</Text><View style={styles.postComposer}><View style={styles.composerAvatar}><Text>Y</Text></View><TextInput multiline placeholder="What would you like to share?" placeholderTextColor="#9AA69F" style={styles.composerInput} /></View><View style={styles.attachRow}><TouchableOpacity style={styles.attachButton}><Text>▣ Photo</Text></TouchableOpacity><TouchableOpacity style={styles.attachButton}><Text>▶ Reel</Text></TouchableOpacity><TouchableOpacity style={styles.attachButton}><Text>▤ Job</Text></TouchableOpacity></View><Button label="Post preview" onPress={() => {}} /><View style={styles.notice}><Text style={styles.noticeTitle}>Posting is not connected yet</Text><Text style={styles.body}>This design is ready for the secure post API and media upload flow.</Text></View></>; }
-function JobsTab() { return <><Text style={styles.pageTitle}>Jobs near you</Text><View style={styles.searchBox}><Text>⌕</Text><TextInput placeholder="Search jobs, skills, or location" placeholderTextColor="#9AA69F" style={styles.searchInput} /></View><View style={styles.filterRow}><Text style={styles.filterActive}>All jobs</Text><Text style={styles.filter}>Part-time</Text><Text style={styles.filter}>Remote</Text></View><View style={styles.listCard}><JobRow title="Cafe team member" meta="Green Valley Cafe · Riverside" /><JobRow title="Delivery driver" meta="Local Store · Westside" /><JobRow title="Store assistant" meta="Fresh Market · Lakeside" /></View></>; }
-function ShopTab() { const [category, setCategory] = useState<'groceries' | 'restaurants' | 'hotels'>('groceries'); const listing = category === 'restaurants' ? { icon: '🍽️', name: 'Riverside Kitchen', meta: 'Indian food · 0.8 km · Open today', title: 'Popular dishes', rows: [['Masala dosa', '$8.99', '🥘'], ['Paneer tikka', '$10.99', '🍛'], ['Mango lassi', '$3.99', '🥤']] } : category === 'hotels' ? { icon: '🏨', name: 'Community Stay Hotel', meta: 'Rooms and breakfast · 1.5 km', title: 'Available rooms', rows: [['Standard room', '$79/night', '🛏️'], ['Family room', '$119/night', '🛌'], ['Breakfast add-on', '$12', '☕']] } : { icon: '🛍️', name: 'Green Valley Store', meta: 'Groceries · 1.2 km · Open today', title: 'Fresh products', rows: [['Fresh tomatoes', '$2.99', '🍅'], ['Bananas', '$1.49', '🍌'], ['Lettuce', '$1.99', '🥬'], ['Rice 5kg', '$8.99', '🍚']] }; return <><Text style={styles.pageTitle}>Local places</Text><Text style={styles.body}>Find groceries, restaurants, and hotels shared by local owners.</Text><View style={styles.searchBox}><Text>⌕</Text><TextInput placeholder="Search local places" placeholderTextColor="#9AA69F" style={styles.searchInput} /></View><View style={styles.filterRow}><TouchableOpacity onPress={() => setCategory('groceries')}><Text style={category === 'groceries' ? styles.filterActive : styles.filter}>Groceries</Text></TouchableOpacity><TouchableOpacity onPress={() => setCategory('restaurants')}><Text style={category === 'restaurants' ? styles.filterActive : styles.filter}>Restaurants</Text></TouchableOpacity><TouchableOpacity onPress={() => setCategory('hotels')}><Text style={category === 'hotels' ? styles.filterActive : styles.filter}>Hotels</Text></TouchableOpacity></View><View style={styles.storeHeader}><View style={styles.storeIcon}><Text>{listing.icon}</Text></View><View><Text style={styles.cardTitle}>{listing.name}</Text><Text style={styles.mutedSmall}>{listing.meta}</Text></View><Text style={styles.verified}>SAMPLE</Text></View><Text style={styles.sectionHeading}>{listing.title}</Text><View style={styles.productGrid}>{listing.rows.map(([name, price, emoji]) => <ProductRow key={name} name={name} price={price} emoji={emoji} />)}</View><View style={styles.notice}><Text style={styles.noticeTitle}>Booking and checkout are not active</Text><Text style={styles.body}>This is a catalog design preview. Secure ordering and reservations will be enabled after the backend and payment phases.</Text></View></>; }
-function ProfileTab({ profile, setProfile, onSave, onRefresh, onSignOut, onDelete, message, error }: { profile: { display_name: string; biography: string; country: string; city: string; preferred_language: string }; setProfile: (profile: { display_name: string; biography: string; country: string; city: string; preferred_language: string }) => void; onSave: () => void; onRefresh: () => void; onSignOut: () => void; onDelete: () => void; message: string; error: string }) { const [workspace, setWorkspace] = useState<'profile' | 'owner' | 'rider'>('profile'); if (workspace === 'owner') return <><TouchableOpacity onPress={() => setWorkspace('profile')}><Text style={styles.link}>‹ Back to profile</Text></TouchableOpacity><Text style={styles.pageTitle}>Shop owner</Text><Text style={styles.body}>Show orders to riders and manage delivery handoff for your store.</Text><MapPreview mode="owner" /><View style={styles.storeHeader}><View style={styles.storeIcon}><Text>🛍️</Text></View><View><Text style={styles.cardTitle}>Green Valley Store</Text><Text style={styles.mutedSmall}>3 orders ready · SAMPLE</Text></View></View><View style={styles.productGrid}><View style={styles.rowCard}><View style={styles.jobIcon}><Text>1</Text></View><View style={styles.rowCopy}><Text style={styles.cardTitle}>Order #1042</Text><Text style={styles.mutedSmall}>2 bags · Ready for rider</Text><Text style={styles.chipOrange}>Show to rider</Text></View></View><View style={styles.rowCard}><View style={styles.jobIcon}><Text>2</Text></View><View style={styles.rowCopy}><Text style={styles.cardTitle}>Order #1043</Text><Text style={styles.mutedSmall}>Restaurant meal · Preparing</Text><Text style={styles.chip}>Waiting for kitchen</Text></View></View></View><View style={styles.notice}><Text style={styles.noticeTitle}>Order management is not connected yet</Text><Text style={styles.body}>This is a sample owner workspace. Real order visibility and rider assignment require authenticated backend data.</Text></View></>; if (workspace === 'rider') return <><TouchableOpacity onPress={() => setWorkspace('profile')}><Text style={styles.link}>‹ Back to profile</Text></TouchableOpacity><Text style={styles.pageTitle}>Delivery driver</Text><Text style={styles.body}>See assigned orders, pickup details, and delivery status.</Text><MapPreview mode="rider" /><View style={styles.productGrid}><View style={styles.rowCard}><View style={styles.jobIcon}><Text>1</Text></View><View style={styles.rowCopy}><Text style={styles.cardTitle}>Order #1042</Text><Text style={styles.mutedSmall}>Green Valley Store · 2 bags</Text><Text style={styles.chipOrange}>Pickup ready</Text></View></View><View style={styles.rowCard}><View style={styles.jobIcon}><Text>2</Text></View><View style={styles.rowCopy}><Text style={styles.cardTitle}>Order #1041</Text><Text style={styles.mutedSmall}>Riverside Kitchen · Westside</Text><Text style={styles.chip}>On the way</Text></View></View></View><View style={styles.notice}><Text style={styles.noticeTitle}>Rider tracking is not connected yet</Text><Text style={styles.body}>Real assignments, addresses, and delivery status will only appear after secure order APIs are enabled.</Text></View></>; return <><View style={styles.profileHero}><View style={styles.bigAvatar}><Text>{(profile.display_name || 'Y').slice(0, 1).toUpperCase()}</Text></View><Text style={styles.pageTitle}>{profile.display_name || 'Your profile'}</Text><Text style={styles.body}>{profile.city || 'Add your city'} · Community member</Text></View><Text style={styles.sectionHeading}>Your workspaces</Text><TouchableOpacity style={styles.storeHeader} onPress={() => setWorkspace('owner')}><View style={styles.storeIcon}><Text>🏪</Text></View><View><Text style={styles.cardTitle}>Shop owner</Text><Text style={styles.mutedSmall}>View orders and show them to riders</Text></View><Text style={styles.verified}>›</Text></TouchableOpacity><TouchableOpacity style={styles.storeHeader} onPress={() => setWorkspace('rider')}><View style={styles.storeIcon}><Text>🛵</Text></View><View><Text style={styles.cardTitle}>Delivery driver</Text><Text style={styles.mutedSmall}>View pickups and delivery tasks</Text></View><Text style={styles.verified}>›</Text></TouchableOpacity>{(['display_name', 'biography', 'country', 'city', 'preferred_language'] as const).map((field) => <TextInput key={field} placeholder={field.replace('_', ' ')} placeholderTextColor="#9AA69F" value={profile[field]} onChangeText={(value) => setProfile({ ...profile, [field]: value })} style={styles.input} />)}<Button label="Save profile" onPress={onSave} /><Button label="Refresh session" onPress={onRefresh} /><TouchableOpacity onPress={onSignOut}><Text style={styles.link}>Sign out</Text></TouchableOpacity><TouchableOpacity onPress={onDelete}><Text style={styles.danger}>Delete account</Text></TouchableOpacity><Text style={styles.error}>{error}</Text><Text style={styles.message}>{message}</Text></>; }
-function MapPreview({ mode }: { mode: 'owner' | 'rider' }) { return <>{mode === 'owner' && <OwnerReports />}<View style={mapStyles.mapPreview}><View style={mapStyles.mapRoadOne} /><View style={mapStyles.mapRoadTwo} /><View style={mapStyles.mapRoadThree} /><View style={mapStyles.mapMarkerStore}><Text>🏪</Text></View>{mode === 'rider' && <><View style={mapStyles.mapRoute} /><View style={mapStyles.mapMarkerRider}><Text>🛵</Text></View><View style={mapStyles.mapMarkerHome}><Text>📍</Text></View></>}<View style={mapStyles.mapLabel}><Text style={mapStyles.mapLabelTitle}>{mode === 'owner' ? 'Pickup area' : 'Delivery route'}</Text><Text style={styles.mutedSmall}>{mode === 'owner' ? 'Riders can see the store pickup point' : 'Store → customer · SAMPLE MAP'}</Text></View></View></>; }
-function OwnerReports() { return <View style={ownerStyles.reportCard}><Text style={styles.sectionHeading}>Store reports</Text><Text style={styles.mutedSmall}>Green Valley Store · SAMPLE DATA</Text><View style={ownerStyles.metricRow}><View style={ownerStyles.metric}><Text style={ownerStyles.metricLabel}>Today sales</Text><Text style={ownerStyles.metricValue}>$428</Text><Text style={ownerStyles.metricNote}>18 orders</Text></View><View style={ownerStyles.metric}><Text style={ownerStyles.metricLabel}>This month</Text><Text style={ownerStyles.metricValue}>$8,940</Text><Text style={ownerStyles.metricNote}>312 orders</Text></View><View style={ownerStyles.metric}><Text style={ownerStyles.metricLabel}>Stock value</Text><Text style={ownerStyles.metricValue}>$2,180</Text><Text style={ownerStyles.metricNote}>42 products</Text></View></View><Text style={ownerStyles.subheading}>Stock to manage</Text><View style={ownerStyles.stockRow}><Text style={ownerStyles.stockName}>Fresh tomatoes</Text><Text style={ownerStyles.stockCount}>8 left</Text><TouchableOpacity style={ownerStyles.stockButton}><Text style={ownerStyles.stockButtonText}>Update</Text></TouchableOpacity></View><View style={ownerStyles.stockRow}><Text style={ownerStyles.stockName}>Rice 5kg</Text><Text style={ownerStyles.lowStock}>2 left</Text><TouchableOpacity style={ownerStyles.stockButton}><Text style={ownerStyles.stockButtonText}>Update</Text></TouchableOpacity></View><Text style={styles.noticeTitle}>Stock and reports are preview only</Text></View>; }
-const ownerStyles = StyleSheet.create({ reportCard: { backgroundColor: '#fff', borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 14, marginBottom: 16 }, metricRow: { flexDirection: 'row', gap: 7, marginTop: 12 }, metric: { flex: 1, backgroundColor: '#F3F8F0', borderRadius: 9, padding: 9 }, metricLabel: { color: colors.muted, fontSize: 9, fontWeight: '700' }, metricValue: { color: colors.ink, fontSize: 16, fontWeight: '900', marginTop: 5 }, metricNote: { color: colors.muted, fontSize: 8, marginTop: 2 }, subheading: { color: colors.ink, fontSize: 11, fontWeight: '900', marginTop: 15, marginBottom: 5 }, stockRow: { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 9 }, stockName: { flex: 1, color: colors.ink, fontSize: 11, fontWeight: '700' }, stockCount: { color: colors.primary, fontSize: 10, fontWeight: '800', marginRight: 8 }, lowStock: { color: '#AE4C40', fontSize: 10, fontWeight: '800', marginRight: 8 }, stockButton: { backgroundColor: colors.mint, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 5 }, stockButtonText: { color: colors.primary, fontSize: 8, fontWeight: '900' } });
-const mapStyles = StyleSheet.create({ mapPreview: { height: 170, borderRadius: 16, overflow: 'hidden', backgroundColor: '#DCE8D9', marginVertical: 16, position: 'relative' }, mapRoadOne: { position: 'absolute', width: '130%', height: 18, backgroundColor: '#F7F3E9', top: 58, left: -25, transform: [{ rotate: '-18deg' }] }, mapRoadTwo: { position: 'absolute', width: '120%', height: 13, backgroundColor: '#F7F3E9', top: 116, left: -15, transform: [{ rotate: '24deg' }] }, mapRoadThree: { position: 'absolute', width: 12, height: '120%', backgroundColor: '#F7F3E9', top: -10, left: 130, transform: [{ rotate: '16deg' }] }, mapRoute: { position: 'absolute', width: 170, height: 5, backgroundColor: '#F47721', top: 84, left: 64, transform: [{ rotate: '-15deg' }] }, mapMarkerStore: { position: 'absolute', top: 42, left: 50, width: 34, height: 34, borderRadius: 17, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.primary }, mapMarkerRider: { position: 'absolute', top: 66, left: 140, width: 34, height: 34, borderRadius: 17, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#F47721' }, mapMarkerHome: { position: 'absolute', top: 112, right: 35, width: 34, height: 34, borderRadius: 17, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#AE4C40' }, mapLabel: { position: 'absolute', left: 12, right: 12, bottom: 10, backgroundColor: 'rgba(255,255,255,.92)', borderRadius: 10, padding: 8 }, mapLabelTitle: { color: colors.ink, fontSize: 11, fontWeight: '900', marginBottom: 2 } });
-function JobRow({ title, meta }: { title: string; meta: string }) { return <View style={styles.rowCard}><View style={styles.jobIcon}><Text>▣</Text></View><View style={styles.rowCopy}><Text style={styles.cardTitle}>{title}</Text><Text style={styles.mutedSmall}>{meta}</Text><View style={styles.chipRow}><Text style={styles.chip}>Flexible</Text><Text style={styles.chipOrange}>Apply</Text></View></View></View>; }
-function ProductRow({ name, price, emoji }: { name: string; price: string; emoji: string }) { return <View style={styles.productItem}><View style={styles.productEmoji}><Text>{emoji}</Text></View><Text style={styles.productName}>{name}</Text><Text style={styles.productPrice}>{price}</Text><TouchableOpacity style={styles.addButton}><Text style={styles.addText}>Add</Text></TouchableOpacity></View>; }
+const headerStyles = StyleSheet.create({
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  action: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  actionText: { color: colors.ink, fontSize: 23, fontWeight: '700' },
+  languageAction: {
+    minWidth: 44,
+    minHeight: 44,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  languageText: { color: colors.primary, fontSize: 11, fontWeight: '800' },
+  dot: {
+    position: 'absolute',
+    top: 3,
+    right: 3,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#F47721',
+  },
+});
+function SectionTitle({
+  title,
+  action,
+  onPress,
+}: {
+  title: string;
+  action?: string;
+  onPress?: () => void;
+}) {
+  return (
+    <View style={styles.sectionTitle}>
+      <Text style={styles.sectionHeading}>{title}</Text>
+      {action && (
+        <TouchableOpacity onPress={onPress}>
+          <Text style={styles.sectionAction}>{action} ›</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+function HomeTab({ onTab }: { onTab: (tab: AppTab) => void }) {
+  const stories = [
+    ['+', 'Your story', null],
+    ['👩🏽', 'Neighbors', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=160&q=80'],
+    ['🥬', 'Food', 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=160&q=80'],
+    ['🧰', 'Jobs', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=160&q=80'],
+    ['🏪', 'Stores', 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=160&q=80'],
+  ];
+  return (
+    <>
+      <View style={styles.storyRow}>
+        {stories.map(([icon, label, image]) => (
+          <TouchableOpacity
+            key={label}
+            style={styles.story}
+            onPress={() =>
+              label === 'Jobs'
+                ? onTab('jobs')
+                : label === 'Food' || label === 'Stores'
+                  ? onTab('shop')
+                  : onTab('post')
+            }
+          >
+            <View style={styles.storyCircle}>
+              {image ? (
+                <Image source={{ uri: image }} style={styles.storyImage} />
+              ) : (
+                <Text style={styles.storyIcon}>{icon}</Text>
+              )}
+            </View>
+            <Text style={styles.storyLabel}>{label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <View style={styles.card}>
+        <View style={styles.postHeader}>
+          <View style={styles.avatar}>
+            <Text>AM</Text>
+          </View>
+          <View style={styles.postAuthor}>
+            <Text style={styles.cardTitle}>Arjun Mehta</Text>
+            <Text style={styles.mutedSmall}>Riverside · 2h ago</Text>
+          </View>
+          <Text style={styles.more}>•••</Text>
+        </View>
+        <Text style={styles.postText}>
+          Beautiful morning in our community park! Grateful for these amazing people 🧡
+        </Text>
+        <Image
+          source={{
+            uri: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=900&q=85',
+          }}
+          style={styles.feedImage}
+        />
+        <Text style={styles.sampleTag}>SAMPLE POST</Text>
+        <View style={styles.postActions}>
+          <Text style={styles.actionLike}>♥ 128</Text>
+          <Text>◯ 24</Text>
+          <Text>↗ Share</Text>
+          <Text>♡</Text>
+        </View>
+      </View>
+      <View style={styles.reelCard}>
+        <Image
+          source={{ uri: 'https://images.unsplash.com/photo-1543353071-10c8ba85a904?w=900&q=85' }}
+          style={styles.reelImage}
+        />
+        <View style={styles.play}>
+          <Text>▶</Text>
+        </View>
+        <Text style={styles.reelDuration}>0:28</Text>
+        <Text style={styles.reelText}>Quick & healthy meal for busy days 🌿</Text>
+        <View style={styles.postActions}>
+          <Text style={styles.actionLike}>♥ 342</Text>
+          <Text>◯ 56</Text>
+          <Text>↗</Text>
+        </View>
+      </View>
+      <View style={styles.splitGrid}>
+        <View style={[styles.miniPanel, styles.jobsPanel]}>
+          <SectionTitle title="Local jobs" action="View all" onPress={() => onTab('jobs')} />
+          <JobRow title="Cafe team member" meta="Part-time · Riverside" />
+          <JobRow title="Delivery driver" meta="Full-time · Westside" />
+        </View>
+        <View style={[styles.miniPanel, styles.shopPanel]}>
+          <SectionTitle title="Fresh groceries" action="View all" onPress={() => onTab('shop')} />
+          <Image
+            source={{
+              uri: 'https://images.unsplash.com/photo-1610348725531-843dff563e2c?w=700&q=85',
+            }}
+            style={styles.groceryImage}
+          />
+          <Text style={styles.storeName}>Green Valley Store</Text>
+          <ProductRow name="Fresh tomatoes" price="$2.99" emoji="🍅" />
+          <ProductRow name="Bananas" price="$1.49" emoji="🍌" />
+        </View>
+      </View>
+      <MobilePromotionEntry ViewComponent={View} TextComponent={Text} />
+    </>
+  );
+}
+function PostTab() {
+  return (
+    <>
+      <Text style={styles.pageTitle}>Create a post</Text>
+      <Text style={styles.body}>Share an update, photo, short reel, job, or local promotion.</Text>
+      <View style={styles.postComposer}>
+        <View style={styles.composerAvatar}>
+          <Text>Y</Text>
+        </View>
+        <TextInput
+          multiline
+          placeholder="What would you like to share?"
+          placeholderTextColor="#9AA69F"
+          style={styles.composerInput}
+        />
+      </View>
+      <View style={styles.attachRow}>
+        <TouchableOpacity style={styles.attachButton}>
+          <Text>▣ Photo</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.attachButton}>
+          <Text>▶ Reel</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.attachButton}>
+          <Text>▤ Job</Text>
+        </TouchableOpacity>
+      </View>
+      <Button label="Post preview" onPress={() => {}} />
+      <View style={styles.notice}>
+        <Text style={styles.noticeTitle}>Posting is not connected yet</Text>
+        <Text style={styles.body}>
+          This design is ready for the secure post API and media upload flow.
+        </Text>
+      </View>
+    </>
+  );
+}
+function JobsTab() {
+  return (
+    <>
+      <Text style={styles.pageTitle}>Jobs near you</Text>
+      <View style={styles.searchBox}>
+        <Text>⌕</Text>
+        <TextInput
+          placeholder="Search jobs, skills, or location"
+          placeholderTextColor="#9AA69F"
+          style={styles.searchInput}
+        />
+      </View>
+      <View style={styles.filterRow}>
+        <Text style={styles.filterActive}>All jobs</Text>
+        <Text style={styles.filter}>Part-time</Text>
+        <Text style={styles.filter}>Remote</Text>
+      </View>
+      <View style={styles.listCard}>
+        <JobRow title="Cafe team member" meta="Green Valley Cafe · Riverside" />
+        <JobRow title="Delivery driver" meta="Local Store · Westside" />
+        <JobRow title="Store assistant" meta="Fresh Market · Lakeside" />
+      </View>
+    </>
+  );
+}
+function ShopTab() {
+  const [category, setCategory] = useState<'groceries' | 'restaurants' | 'hotels'>('groceries');
+  const listing =
+    category === 'restaurants'
+      ? {
+          icon: '🍽️',
+          name: 'Riverside Kitchen',
+          meta: 'Indian food · 0.8 km · Open today',
+          title: 'Popular dishes',
+          rows: [
+            ['Masala dosa', '$8.99', '🥘'],
+            ['Paneer tikka', '$10.99', '🍛'],
+            ['Mango lassi', '$3.99', '🥤'],
+          ],
+        }
+      : category === 'hotels'
+        ? {
+            icon: '🏨',
+            name: 'Community Stay Hotel',
+            meta: 'Rooms and breakfast · 1.5 km',
+            title: 'Available rooms',
+            rows: [
+              ['Standard room', '$79/night', '🛏️'],
+              ['Family room', '$119/night', '🛌'],
+              ['Breakfast add-on', '$12', '☕'],
+            ],
+          }
+        : {
+            icon: '🛍️',
+            name: 'Green Valley Store',
+            meta: 'Groceries · 1.2 km · Open today',
+            title: 'Fresh products',
+            rows: [
+              ['Fresh tomatoes', '$2.99', '🍅'],
+              ['Bananas', '$1.49', '🍌'],
+              ['Lettuce', '$1.99', '🥬'],
+              ['Rice 5kg', '$8.99', '🍚'],
+            ],
+          };
+  return (
+    <>
+      <Text style={styles.pageTitle}>Local places</Text>
+      <Text style={styles.body}>
+        Find groceries, restaurants, and hotels shared by local owners.
+      </Text>
+      <View style={styles.searchBox}>
+        <Text>⌕</Text>
+        <TextInput
+          placeholder="Search local places"
+          placeholderTextColor="#9AA69F"
+          style={styles.searchInput}
+        />
+      </View>
+      <View style={styles.filterRow}>
+        <TouchableOpacity onPress={() => setCategory('groceries')}>
+          <Text style={category === 'groceries' ? styles.filterActive : styles.filter}>
+            Groceries
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setCategory('restaurants')}>
+          <Text style={category === 'restaurants' ? styles.filterActive : styles.filter}>
+            Restaurants
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setCategory('hotels')}>
+          <Text style={category === 'hotels' ? styles.filterActive : styles.filter}>Hotels</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.storeHeader}>
+        <View style={styles.storeIcon}>
+          <Text>{listing.icon}</Text>
+        </View>
+        <View>
+          <Text style={styles.cardTitle}>{listing.name}</Text>
+          <Text style={styles.mutedSmall}>{listing.meta}</Text>
+        </View>
+        <Text style={styles.verified}>SAMPLE</Text>
+      </View>
+      <Text style={styles.sectionHeading}>{listing.title}</Text>
+      <View style={styles.productGrid}>
+        {listing.rows.map(([name, price, emoji]) => (
+          <ProductRow key={name} name={name} price={price} emoji={emoji} />
+        ))}
+      </View>
+      <View style={styles.notice}>
+        <Text style={styles.noticeTitle}>Booking and checkout are not active</Text>
+        <Text style={styles.body}>
+          This is a catalog design preview. Secure ordering and reservations will be enabled after
+          the backend and payment phases.
+        </Text>
+      </View>
+    </>
+  );
+}
+function ProfileTab({
+  profile,
+  setProfile,
+  onSave,
+  onRefresh,
+  onSignOut,
+  onDelete,
+  message,
+  error,
+  t,
+}: {
+  profile: {
+    display_name: string;
+    biography: string;
+    country: string;
+    city: string;
+    preferred_language: string;
+  };
+  setProfile: (profile: {
+    display_name: string;
+    biography: string;
+    country: string;
+    city: string;
+    preferred_language: string;
+  }) => void;
+  onSave: () => void;
+  onRefresh: () => void;
+  onSignOut: () => void;
+  onDelete: () => void;
+  message: string;
+  error: string;
+  t: Translator;
+}) {
+  const [workspace, setWorkspace] = useState<'profile' | 'owner' | 'rider'>('profile');
+  if (workspace === 'owner')
+    return (
+      <>
+        <TouchableOpacity onPress={() => setWorkspace('profile')}>
+          <Text style={styles.link}>‹ Back to profile</Text>
+        </TouchableOpacity>
+        <Text style={styles.pageTitle}>Shop owner</Text>
+        <Text style={styles.body}>
+          Show orders to riders and manage delivery handoff for your store.
+        </Text>
+        <MapPreview mode="owner" />
+        <View style={styles.storeHeader}>
+          <View style={styles.storeIcon}>
+            <Text>🛍️</Text>
+          </View>
+          <View>
+            <Text style={styles.cardTitle}>Green Valley Store</Text>
+            <Text style={styles.mutedSmall}>3 orders ready · SAMPLE</Text>
+          </View>
+        </View>
+        <View style={styles.productGrid}>
+          <View style={styles.rowCard}>
+            <View style={styles.jobIcon}>
+              <Text>1</Text>
+            </View>
+            <View style={styles.rowCopy}>
+              <Text style={styles.cardTitle}>Order #1042</Text>
+              <Text style={styles.mutedSmall}>2 bags · Ready for rider</Text>
+              <Text style={styles.chipOrange}>Show to rider</Text>
+            </View>
+          </View>
+          <View style={styles.rowCard}>
+            <View style={styles.jobIcon}>
+              <Text>2</Text>
+            </View>
+            <View style={styles.rowCopy}>
+              <Text style={styles.cardTitle}>Order #1043</Text>
+              <Text style={styles.mutedSmall}>Restaurant meal · Preparing</Text>
+              <Text style={styles.chip}>Waiting for kitchen</Text>
+            </View>
+          </View>
+        </View>
+        <View style={styles.notice}>
+          <Text style={styles.noticeTitle}>Order management is not connected yet</Text>
+          <Text style={styles.body}>
+            This is a sample owner workspace. Real order visibility and rider assignment require
+            authenticated backend data.
+          </Text>
+        </View>
+      </>
+    );
+  if (workspace === 'rider')
+    return (
+      <>
+        <TouchableOpacity onPress={() => setWorkspace('profile')}>
+          <Text style={styles.link}>‹ Back to profile</Text>
+        </TouchableOpacity>
+        <Text style={styles.pageTitle}>Delivery driver</Text>
+        <Text style={styles.body}>See assigned orders, pickup details, and delivery status.</Text>
+        <MapPreview mode="rider" />
+        <View style={styles.productGrid}>
+          <View style={styles.rowCard}>
+            <View style={styles.jobIcon}>
+              <Text>1</Text>
+            </View>
+            <View style={styles.rowCopy}>
+              <Text style={styles.cardTitle}>Order #1042</Text>
+              <Text style={styles.mutedSmall}>Green Valley Store · 2 bags</Text>
+              <Text style={styles.chipOrange}>Pickup ready</Text>
+            </View>
+          </View>
+          <View style={styles.rowCard}>
+            <View style={styles.jobIcon}>
+              <Text>2</Text>
+            </View>
+            <View style={styles.rowCopy}>
+              <Text style={styles.cardTitle}>Order #1041</Text>
+              <Text style={styles.mutedSmall}>Riverside Kitchen · Westside</Text>
+              <Text style={styles.chip}>On the way</Text>
+            </View>
+          </View>
+        </View>
+        <View style={styles.notice}>
+          <Text style={styles.noticeTitle}>Rider tracking is not connected yet</Text>
+          <Text style={styles.body}>
+            Real assignments, addresses, and delivery status will only appear after secure order
+            APIs are enabled.
+          </Text>
+        </View>
+      </>
+    );
+  return (
+    <>
+      <View style={styles.profileHero}>
+        <View style={styles.bigAvatar}>
+          <Text>{(profile.display_name || 'Y').slice(0, 1).toUpperCase()}</Text>
+        </View>
+        <Text style={styles.pageTitle}>{profile.display_name || t('profile.yourProfile')}</Text>
+        <Text style={styles.body}>
+          {profile.city || t('profile.addCity')} · {t('profile.communityMember')}
+        </Text>
+      </View>
+      <Text style={styles.sectionHeading}>{t('profile.workspaces')}</Text>
+      <TouchableOpacity style={styles.storeHeader} onPress={() => setWorkspace('owner')}>
+        <View style={styles.storeIcon}>
+          <Text>🏪</Text>
+        </View>
+        <View>
+          <Text style={styles.cardTitle}>{t('profile.shopOwner')}</Text>
+          <Text style={styles.mutedSmall}>{t('profile.shopOwnerHint')}</Text>
+        </View>
+        <Text style={styles.verified}>›</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.storeHeader} onPress={() => setWorkspace('rider')}>
+        <View style={styles.storeIcon}>
+          <Text>🛵</Text>
+        </View>
+        <View>
+          <Text style={styles.cardTitle}>{t('profile.deliveryDriver')}</Text>
+          <Text style={styles.mutedSmall}>{t('profile.deliveryDriverHint')}</Text>
+        </View>
+        <Text style={styles.verified}>›</Text>
+      </TouchableOpacity>
+      {(
+        [
+          ['display_name', 'profile.displayName'],
+          ['biography', 'profile.biography'],
+          ['country', 'profile.country'],
+          ['city', 'profile.city'],
+          ['preferred_language', 'profile.preferredLanguage'],
+        ] as const
+      ).map(([field, labelKey]) => (
+        <TextInput
+          key={field}
+          placeholder={t(labelKey)}
+          placeholderTextColor="#9AA69F"
+          value={profile[field]}
+          onChangeText={(value) => setProfile({ ...profile, [field]: value })}
+          style={styles.input}
+        />
+      ))}
+      <Button label={t('profile.save')} onPress={onSave} />
+      <Button label={t('profile.refresh')} onPress={onRefresh} />
+      <TouchableOpacity onPress={onSignOut}>
+        <Text style={styles.link}>{t('profile.signOut')}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={onDelete}>
+        <Text style={styles.danger}>{t('profile.delete')}</Text>
+      </TouchableOpacity>
+      <Text style={styles.error}>{error}</Text>
+      <Text style={styles.message}>{message}</Text>
+    </>
+  );
+}
+function MapPreview({ mode }: { mode: 'owner' | 'rider' }) {
+  return (
+    <>
+      {mode === 'owner' && <OwnerReports />}
+      <View style={mapStyles.mapPreview}>
+        <View style={mapStyles.mapRoadOne} />
+        <View style={mapStyles.mapRoadTwo} />
+        <View style={mapStyles.mapRoadThree} />
+        <View style={mapStyles.mapMarkerStore}>
+          <Text>🏪</Text>
+        </View>
+        {mode === 'rider' && (
+          <>
+            <View style={mapStyles.mapRoute} />
+            <View style={mapStyles.mapMarkerRider}>
+              <Text>🛵</Text>
+            </View>
+            <View style={mapStyles.mapMarkerHome}>
+              <Text>📍</Text>
+            </View>
+          </>
+        )}
+        <View style={mapStyles.mapLabel}>
+          <Text style={mapStyles.mapLabelTitle}>
+            {mode === 'owner' ? 'Pickup area' : 'Delivery route'}
+          </Text>
+          <Text style={styles.mutedSmall}>
+            {mode === 'owner'
+              ? 'Riders can see the store pickup point'
+              : 'Store → customer · SAMPLE MAP'}
+          </Text>
+        </View>
+      </View>
+    </>
+  );
+}
+function OwnerReports() {
+  return (
+    <View style={ownerStyles.reportCard}>
+      <Text style={styles.sectionHeading}>Store reports</Text>
+      <Text style={styles.mutedSmall}>Green Valley Store · SAMPLE DATA</Text>
+      <View style={ownerStyles.metricRow}>
+        <View style={ownerStyles.metric}>
+          <Text style={ownerStyles.metricLabel}>Today sales</Text>
+          <Text style={ownerStyles.metricValue}>$428</Text>
+          <Text style={ownerStyles.metricNote}>18 orders</Text>
+        </View>
+        <View style={ownerStyles.metric}>
+          <Text style={ownerStyles.metricLabel}>This month</Text>
+          <Text style={ownerStyles.metricValue}>$8,940</Text>
+          <Text style={ownerStyles.metricNote}>312 orders</Text>
+        </View>
+        <View style={ownerStyles.metric}>
+          <Text style={ownerStyles.metricLabel}>Stock value</Text>
+          <Text style={ownerStyles.metricValue}>$2,180</Text>
+          <Text style={ownerStyles.metricNote}>42 products</Text>
+        </View>
+      </View>
+      <Text style={ownerStyles.subheading}>Stock to manage</Text>
+      <View style={ownerStyles.stockRow}>
+        <Text style={ownerStyles.stockName}>Fresh tomatoes</Text>
+        <Text style={ownerStyles.stockCount}>8 left</Text>
+        <TouchableOpacity style={ownerStyles.stockButton}>
+          <Text style={ownerStyles.stockButtonText}>Update</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={ownerStyles.stockRow}>
+        <Text style={ownerStyles.stockName}>Rice 5kg</Text>
+        <Text style={ownerStyles.lowStock}>2 left</Text>
+        <TouchableOpacity style={ownerStyles.stockButton}>
+          <Text style={ownerStyles.stockButtonText}>Update</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.noticeTitle}>Stock and reports are preview only</Text>
+    </View>
+  );
+}
+const ownerStyles = StyleSheet.create({
+  reportCard: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+  },
+  metricRow: { flexDirection: 'row', gap: 7, marginTop: 12 },
+  metric: { flex: 1, backgroundColor: '#F3F8F0', borderRadius: 9, padding: 9 },
+  metricLabel: { color: colors.muted, fontSize: 9, fontWeight: '700' },
+  metricValue: { color: colors.ink, fontSize: 16, fontWeight: '900', marginTop: 5 },
+  metricNote: { color: colors.muted, fontSize: 8, marginTop: 2 },
+  subheading: {
+    color: colors.ink,
+    fontSize: 11,
+    fontWeight: '900',
+    marginTop: 15,
+    marginBottom: 5,
+  },
+  stockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingVertical: 9,
+  },
+  stockName: { flex: 1, color: colors.ink, fontSize: 11, fontWeight: '700' },
+  stockCount: { color: colors.primary, fontSize: 10, fontWeight: '800', marginRight: 8 },
+  lowStock: { color: '#9B3F35', fontSize: 10, fontWeight: '800', marginRight: 8 },
+  stockButton: {
+    backgroundColor: colors.mint,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+  },
+  stockButtonText: { color: colors.primary, fontSize: 8, fontWeight: '900' },
+});
+const mapStyles = StyleSheet.create({
+  mapPreview: {
+    height: 170,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#DCE8D9',
+    marginVertical: 16,
+    position: 'relative',
+  },
+  mapRoadOne: {
+    position: 'absolute',
+    width: '130%',
+    height: 18,
+    backgroundColor: '#F7F3E9',
+    top: 58,
+    left: -25,
+    transform: [{ rotate: '-18deg' }],
+  },
+  mapRoadTwo: {
+    position: 'absolute',
+    width: '120%',
+    height: 13,
+    backgroundColor: '#F7F3E9',
+    top: 116,
+    left: -15,
+    transform: [{ rotate: '24deg' }],
+  },
+  mapRoadThree: {
+    position: 'absolute',
+    width: 12,
+    height: '120%',
+    backgroundColor: '#F7F3E9',
+    top: -10,
+    left: 130,
+    transform: [{ rotate: '16deg' }],
+  },
+  mapRoute: {
+    position: 'absolute',
+    width: 170,
+    height: 5,
+    backgroundColor: '#F47721',
+    top: 84,
+    left: 64,
+    transform: [{ rotate: '-15deg' }],
+  },
+  mapMarkerStore: {
+    position: 'absolute',
+    top: 42,
+    left: 50,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.primary,
+  },
+  mapMarkerRider: {
+    position: 'absolute',
+    top: 66,
+    left: 140,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#F47721',
+  },
+  mapMarkerHome: {
+    position: 'absolute',
+    top: 112,
+    right: 35,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#9B3F35',
+  },
+  mapLabel: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 10,
+    backgroundColor: 'rgba(255,255,255,.92)',
+    borderRadius: 10,
+    padding: 8,
+  },
+  mapLabelTitle: { color: colors.ink, fontSize: 11, fontWeight: '900', marginBottom: 2 },
+});
+function JobRow({ title, meta }: { title: string; meta: string }) {
+  return (
+    <View style={styles.rowCard}>
+      <View style={styles.jobIcon}>
+        <Text>▣</Text>
+      </View>
+      <View style={styles.rowCopy}>
+        <Text style={styles.cardTitle}>{title}</Text>
+        <Text style={styles.mutedSmall}>{meta}</Text>
+        <View style={styles.chipRow}>
+          <Text style={styles.chip}>Flexible</Text>
+          <Text style={styles.chipOrange}>Apply</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+function ProductRow({ name, price, emoji }: { name: string; price: string; emoji: string }) {
+  return (
+    <View style={styles.productItem}>
+      <View style={styles.productEmoji}>
+        <Text>{emoji}</Text>
+      </View>
+      <Text style={styles.productName}>{name}</Text>
+      <Text style={styles.productPrice}>{price}</Text>
+      <TouchableOpacity style={styles.addButton}>
+        <Text style={styles.addText}>Add</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
-function Button({ label, onPress }: { label: string; onPress: () => void }) { return <TouchableOpacity style={styles.button} onPress={onPress}><Text style={styles.buttonText}>{label}</Text></TouchableOpacity>; }
-function normalizeError(error: unknown) { const message = error instanceof Error ? error.message : 'Authentication failed.'; if (/rate limit|too many|429/i.test(message)) return 'Too many attempts. Wait before trying again.'; if (/expired|invalid.*token|otp/i.test(message)) return 'That code is invalid or expired.'; if (/already registered|already exists|user already/i.test(message)) return 'This identity is already registered. Try signing in.'; if (/provider|sms|phone/i.test(message)) return 'SMS delivery is not configured or was rejected.'; return message; }
+function Button({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={styles.button}
+      onPress={onPress}
+    >
+      <Text style={styles.buttonText}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+function normalizeError(error: unknown, t: Translator) {
+  const message = error instanceof Error ? error.message : t('error.authenticationFailed');
+  if (/rate limit|too many|429/i.test(message)) return t('error.rateLimit');
+  if (/expired|invalid.*token|otp/i.test(message)) return t('error.invalidOtp');
+  if (/already registered|already exists|user already/i.test(message))
+    return t('error.alreadyRegistered');
+  if (/provider|sms|phone/i.test(message)) return t('error.provider');
+  return message;
+}
 
-const styles = StyleSheet.create({ appShell: { flex: 1 }, appHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 18, paddingBottom: 7, backgroundColor: colors.paper }, brand: { color: colors.ink, fontSize: 22, fontWeight: '900', letterSpacing: -1 }, brandAccent: { color: '#F47721' }, headerSub: { color: colors.muted, fontSize: 11, marginTop: 3 }, headerAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#F6C7A0', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#F47721' }, avatarText: { color: colors.ink, fontWeight: '800' }, tabBar: { flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: '#fff', paddingTop: 8, paddingBottom: 11 }, tabItem: { alignItems: 'center', minWidth: 52 }, tabIcon: { color: '#89978F', fontSize: 22, lineHeight: 24 }, tabLabel: { color: '#89978F', fontSize: 10, fontWeight: '700', marginTop: 2 }, tabSelected: { color: '#F47721' }, tabDot: { height: 3, width: 19, backgroundColor: '#F47721', borderRadius: 3, marginTop: 3 }, storyRow: { flexDirection: 'row', gap: 13, marginBottom: 18 }, story: { alignItems: 'center', width: 55 }, storyCircle: { width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: '#F47721', backgroundColor: '#FFF3E9', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }, storyImage: { width: '100%', height: '100%' }, storyIcon: { fontSize: 21 }, storyLabel: { color: colors.muted, fontSize: 9, marginTop: 5, textAlign: 'center' }, card: { backgroundColor: '#fff', borderRadius: 17, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 14 }, postHeader: { flexDirection: 'row', alignItems: 'center' }, avatar: { width: 35, height: 35, borderRadius: 18, backgroundColor: '#DDECD7', alignItems: 'center', justifyContent: 'center' }, avatarTextSmall: { fontSize: 10 }, postAuthor: { marginLeft: 9, flex: 1 }, mutedSmall: { color: colors.muted, fontSize: 10 }, more: { color: colors.muted, letterSpacing: 2 }, postText: { color: colors.ink, fontSize: 14, lineHeight: 20, marginVertical: 12 }, feedImage: { width: '100%', height: 194, borderRadius: 13 }, sampleTag: { alignSelf: 'flex-end', color: '#fff', backgroundColor: 'rgba(0,0,0,.5)', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 3, fontSize: 8, fontWeight: '800', marginTop: -24, marginRight: 8, marginBottom: 8 }, mediaBox: { borderRadius: 13, overflow: 'hidden', height: 166, alignItems: 'center', justifyContent: 'center' }, photoBox: { backgroundColor: '#B9D9B0' }, mediaEmoji: { fontSize: 38 }, sampleOverlay: { position: 'absolute', bottom: 8, right: 9, color: '#fff', backgroundColor: 'rgba(0,0,0,.35)', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 3, fontSize: 8, fontWeight: '800' }, postActions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }, actionLike: { color: '#F0523B', fontWeight: '800' }, reelCard: { backgroundColor: '#fff', borderRadius: 17, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 14, position: 'relative' }, reelImage: { height: 198, borderRadius: 13, backgroundColor: '#E7C1A2' }, reelEmoji: { fontSize: 68 }, play: { position: 'absolute', top: 90, left: '50%', marginLeft: -22, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,.88)', alignItems: 'center', justifyContent: 'center' }, reelDuration: { position: 'absolute', right: 20, top: 181, color: '#fff', backgroundColor: 'rgba(0,0,0,.5)', paddingHorizontal: 5, paddingVertical: 3, fontSize: 10, borderRadius: 4 }, reelText: { color: colors.ink, fontSize: 13, fontWeight: '700', marginTop: 11 }, splitGrid: { flexDirection: 'row', gap: 10 }, miniPanel: { flex: 1, borderRadius: 16, padding: 12, borderWidth: 1 }, jobsPanel: { backgroundColor: '#FFF1E6', borderColor: '#F8D4BA' }, shopPanel: { backgroundColor: '#EDF8EB', borderColor: '#CBE8C3' }, groceryImage: { width: '100%', height: 76, borderRadius: 11, marginBottom: 8 }, storeName: { color: colors.ink, fontSize: 11, fontWeight: '900', marginBottom: 3 }, sectionTitle: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }, sectionHeading: { color: colors.ink, fontSize: 13, fontWeight: '900' }, sectionAction: { color: '#F47721', fontSize: 9, fontWeight: '800' }, pageTitle: { color: colors.ink, fontSize: 27, fontWeight: '900', letterSpacing: -.8, marginBottom: 7 }, searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, marginVertical: 17 }, searchInput: { flex: 1, paddingVertical: 12, color: colors.ink, fontSize: 12 }, filterRow: { flexDirection: 'row', gap: 8, marginBottom: 14 }, filter: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: 15, backgroundColor: '#F0F4F1', color: colors.muted, fontSize: 10, fontWeight: '700' }, filterActive: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: 15, backgroundColor: '#DFF3E8', color: colors.primary, fontSize: 10, fontWeight: '800' }, listCard: { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 13 }, rowCard: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.border }, jobIcon: { width: 38, height: 38, borderRadius: 11, backgroundColor: '#FFE1C7', alignItems: 'center', justifyContent: 'center' }, rowCopy: { flex: 1 }, chipRow: { flexDirection: 'row', gap: 5, marginTop: 7 }, chip: { color: colors.primary, backgroundColor: '#E1F2E7', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4, fontSize: 8, fontWeight: '800' }, chipOrange: { color: '#D85C12', backgroundColor: '#FFF0E4', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4, fontSize: 8, fontWeight: '800' }, storeHeader: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 15, padding: 13, borderWidth: 1, borderColor: colors.border, marginBottom: 12 }, storeIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#DDF2D7', alignItems: 'center', justifyContent: 'center', marginRight: 10 }, verified: { marginLeft: 'auto', color: colors.primary, fontSize: 9, fontWeight: '900' }, productGrid: { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 13 }, productItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.border }, productEmoji: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#F3F8F0', alignItems: 'center', justifyContent: 'center' }, productName: { flex: 1, color: colors.ink, fontSize: 11, fontWeight: '700' }, productPrice: { color: colors.ink, fontSize: 11, fontWeight: '900' }, addButton: { backgroundColor: colors.primary, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 6 }, addText: { color: '#fff', fontSize: 9, fontWeight: '900' }, postComposer: { flexDirection: 'row', gap: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 13, marginTop: 22, minHeight: 145 }, composerAvatar: { width: 35, height: 35, borderRadius: 18, backgroundColor: '#F6C7A0', alignItems: 'center', justifyContent: 'center' }, composerInput: { flex: 1, color: colors.ink, fontSize: 13, textAlignVertical: 'top' }, attachRow: { flexDirection: 'row', gap: 7, marginTop: 12 }, attachButton: { flex: 1, alignItems: 'center', borderRadius: 9, padding: 10, backgroundColor: '#FFF1E6' }, notice: { backgroundColor: '#FFF8E5', borderRadius: 13, padding: 14, marginTop: 18 }, noticeTitle: { color: '#846A1E', fontSize: 12, fontWeight: '900', marginBottom: 5 }, profileHero: { alignItems: 'center', marginBottom: 15 }, bigAvatar: { width: 78, height: 78, borderRadius: 39, backgroundColor: '#F6C7A0', borderWidth: 3, borderColor: '#F47721', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }, bigAvatarText: { color: colors.ink, fontSize: 27, fontWeight: '900' }, safe: { flex: 1, backgroundColor: colors.paper }, auth: { flexGrow: 1, justifyContent: 'center', padding: 28 }, logo: { width: 42, height: 42, borderRadius: 13, backgroundColor: '#D9ED68', justifyContent: 'center', alignItems: 'center', marginBottom: 24 }, kicker: { color: '#8B9991', fontSize: 10, letterSpacing: 1.5, fontWeight: '800', marginBottom: 8 }, title: { color: colors.ink, fontSize: 32, lineHeight: 37, fontWeight: '800', letterSpacing: -1, marginBottom: 12 }, body: { color: colors.muted, fontSize: 14, lineHeight: 21 }, modeRow: { flexDirection: 'row', gap: 5, backgroundColor: '#F2F5F2', padding: 4, borderRadius: 9, marginTop: 24 }, mode: { flex: 1, padding: 10, alignItems: 'center' }, modeActive: { flex: 1, padding: 10, alignItems: 'center', borderRadius: 7, backgroundColor: '#fff' }, label: { color: colors.muted, fontSize: 10, letterSpacing: 1.3, fontWeight: '800', marginTop: 22, marginBottom: 8 }, input: { borderWidth: 1, borderColor: colors.border, borderRadius: 11, padding: 14, color: colors.ink, backgroundColor: '#fff', fontSize: 15, marginTop: 8 }, button: { backgroundColor: colors.primary, borderRadius: 11, padding: 15, alignItems: 'center', marginTop: 16 }, buttonText: { color: '#fff', fontWeight: '800', fontSize: 14 }, link: { color: colors.primary, fontSize: 12, fontWeight: '700', marginTop: 15 }, cooldown: { color: colors.muted, fontSize: 11, textAlign: 'right', marginTop: 5 }, message: { color: colors.muted, fontSize: 12, textAlign: 'center', marginTop: 13, minHeight: 16 }, error: { color: '#AE4C40', fontSize: 12, textAlign: 'center', marginTop: 13, minHeight: 16 }, home: { padding: 24 }, row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }, homeTitle: { fontSize: 27, fontWeight: '800', color: colors.ink }, empty: { alignItems: 'center', padding: 30, marginTop: 25, borderWidth: 1, borderColor: colors.border, borderRadius: 16, borderStyle: 'dashed' }, emptyIcon: { fontSize: 28, color: colors.primary, marginBottom: 12 }, cardTitle: { fontSize: 14, fontWeight: '800', color: colors.ink, marginBottom: 5 }, danger: { color: '#AE4C40', fontSize: 12, fontWeight: '800', textAlign: 'center', marginTop: 28 } });
+const styles = StyleSheet.create({
+  appShell: { flex: 1 },
+  appHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 18,
+    paddingBottom: 7,
+    backgroundColor: colors.paper,
+  },
+  brand: { color: colors.ink, fontSize: 22, fontWeight: '900', letterSpacing: -1 },
+  brandAccent: { color: '#F47721' },
+  headerSub: { color: colors.muted, fontSize: 11, marginTop: 3 },
+  headerAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#F6C7A0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#F47721',
+  },
+  avatarText: { color: colors.ink, fontWeight: '800' },
+  tabBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: '#fff',
+    paddingTop: 8,
+    paddingBottom: 11,
+  },
+  tabItem: { alignItems: 'center', minWidth: 52 },
+  tabIcon: { color: '#89978F', fontSize: 22, lineHeight: 24 },
+  tabLabel: { color: '#89978F', fontSize: 10, fontWeight: '700', marginTop: 2 },
+  tabSelected: { color: '#F47721' },
+  tabDot: { height: 3, width: 19, backgroundColor: '#F47721', borderRadius: 3, marginTop: 3 },
+  storyRow: { flexDirection: 'row', gap: 13, marginBottom: 18 },
+  story: { alignItems: 'center', width: 55 },
+  storyCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 2,
+    borderColor: '#F47721',
+    backgroundColor: '#FFF3E9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  storyImage: { width: '100%', height: '100%' },
+  storyIcon: { fontSize: 21 },
+  storyLabel: { color: colors.muted, fontSize: 9, marginTop: 5, textAlign: 'center' },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+    marginBottom: 14,
+  },
+  postHeader: { flexDirection: 'row', alignItems: 'center' },
+  avatar: {
+    width: 35,
+    height: 35,
+    borderRadius: 18,
+    backgroundColor: '#DDECD7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarTextSmall: { fontSize: 10 },
+  postAuthor: { marginLeft: 9, flex: 1 },
+  mutedSmall: { color: colors.muted, fontSize: 10 },
+  more: { color: colors.muted, letterSpacing: 2 },
+  postText: { color: colors.ink, fontSize: 14, lineHeight: 20, marginVertical: 12 },
+  feedImage: { width: '100%', height: 194, borderRadius: 13 },
+  sampleTag: {
+    alignSelf: 'flex-end',
+    color: '#fff',
+    backgroundColor: 'rgba(0,0,0,.5)',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 3,
+    fontSize: 8,
+    fontWeight: '800',
+    marginTop: -24,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  mediaBox: {
+    borderRadius: 13,
+    overflow: 'hidden',
+    height: 166,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoBox: { backgroundColor: '#B9D9B0' },
+  mediaEmoji: { fontSize: 38 },
+  sampleOverlay: {
+    position: 'absolute',
+    bottom: 8,
+    right: 9,
+    color: '#fff',
+    backgroundColor: 'rgba(0,0,0,.35)',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 3,
+    fontSize: 8,
+    fontWeight: '800',
+  },
+  postActions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
+  actionLike: { color: '#F0523B', fontWeight: '800' },
+  reelCard: {
+    backgroundColor: '#fff',
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+    marginBottom: 14,
+    position: 'relative',
+  },
+  reelImage: { height: 198, borderRadius: 13, backgroundColor: '#E7C1A2' },
+  reelEmoji: { fontSize: 68 },
+  play: {
+    position: 'absolute',
+    top: 90,
+    left: '50%',
+    marginLeft: -22,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,.88)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reelDuration: {
+    position: 'absolute',
+    right: 20,
+    top: 181,
+    color: '#fff',
+    backgroundColor: 'rgba(0,0,0,.5)',
+    paddingHorizontal: 5,
+    paddingVertical: 3,
+    fontSize: 10,
+    borderRadius: 4,
+  },
+  reelText: { color: colors.ink, fontSize: 13, fontWeight: '700', marginTop: 11 },
+  splitGrid: { flexDirection: 'row', gap: 10 },
+  miniPanel: { flex: 1, borderRadius: 16, padding: 12, borderWidth: 1 },
+  jobsPanel: { backgroundColor: '#FFF1E6', borderColor: '#F8D4BA' },
+  shopPanel: { backgroundColor: '#EDF8EB', borderColor: '#CBE8C3' },
+  groceryImage: { width: '100%', height: 76, borderRadius: 11, marginBottom: 8 },
+  storeName: { color: colors.ink, fontSize: 11, fontWeight: '900', marginBottom: 3 },
+  sectionTitle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  sectionHeading: { color: colors.ink, fontSize: 13, fontWeight: '900' },
+  sectionAction: { color: '#F47721', fontSize: 9, fontWeight: '800' },
+  pageTitle: {
+    color: colors.ink,
+    fontSize: 27,
+    fontWeight: '900',
+    letterSpacing: -0.8,
+    marginBottom: 7,
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    marginVertical: 17,
+  },
+  searchInput: { flex: 1, paddingVertical: 12, color: colors.ink, fontSize: 12 },
+  filterRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  filter: {
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 15,
+    backgroundColor: '#F0F4F1',
+    color: colors.muted,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  filterActive: {
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 15,
+    backgroundColor: '#DFF3E8',
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  listCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 13,
+  },
+  rowCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  jobIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    backgroundColor: '#FFE1C7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowCopy: { flex: 1 },
+  chipRow: { flexDirection: 'row', gap: 5, marginTop: 7 },
+  chip: {
+    color: colors.primary,
+    backgroundColor: '#E1F2E7',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    fontSize: 8,
+    fontWeight: '800',
+  },
+  chipOrange: {
+    color: '#D85C12',
+    backgroundColor: '#FFF0E4',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    fontSize: 8,
+    fontWeight: '800',
+  },
+  storeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 13,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 12,
+  },
+  storeIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#DDF2D7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  verified: { marginLeft: 'auto', color: colors.primary, fontSize: 9, fontWeight: '900' },
+  productGrid: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 13,
+  },
+  productItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  productEmoji: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#F3F8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  productName: { flex: 1, color: colors.ink, fontSize: 11, fontWeight: '700' },
+  productPrice: { color: colors.ink, fontSize: 11, fontWeight: '900' },
+  addButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 7,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  addText: { color: '#fff', fontSize: 9, fontWeight: '900' },
+  postComposer: {
+    flexDirection: 'row',
+    gap: 10,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 15,
+    padding: 13,
+    marginTop: 22,
+    minHeight: 145,
+  },
+  composerAvatar: {
+    width: 35,
+    height: 35,
+    borderRadius: 18,
+    backgroundColor: '#F6C7A0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  composerInput: { flex: 1, color: colors.ink, fontSize: 13, textAlignVertical: 'top' },
+  attachRow: { flexDirection: 'row', gap: 7, marginTop: 12 },
+  attachButton: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: 9,
+    padding: 10,
+    backgroundColor: '#FFF1E6',
+  },
+  notice: { backgroundColor: '#FFF8E5', borderRadius: 13, padding: 14, marginTop: 18 },
+  noticeTitle: { color: '#846A1E', fontSize: 12, fontWeight: '900', marginBottom: 5 },
+  profileHero: { alignItems: 'center', marginBottom: 15 },
+  bigAvatar: {
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    backgroundColor: '#F6C7A0',
+    borderWidth: 3,
+    borderColor: '#F47721',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  bigAvatarText: { color: colors.ink, fontSize: 27, fontWeight: '900' },
+  safe: { flex: 1, backgroundColor: colors.paper },
+  auth: { flexGrow: 1, justifyContent: 'center', padding: 28 },
+  logo: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    backgroundColor: '#D9ED68',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  kicker: {
+    color: '#8B9991',
+    fontSize: 10,
+    letterSpacing: 1.5,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  title: {
+    color: colors.ink,
+    fontSize: 32,
+    lineHeight: 37,
+    fontWeight: '800',
+    letterSpacing: -1,
+    marginBottom: 12,
+  },
+  body: { color: colors.muted, fontSize: 14, lineHeight: 21 },
+  modeRow: {
+    flexDirection: 'row',
+    gap: 5,
+    backgroundColor: '#F2F5F2',
+    padding: 4,
+    borderRadius: 9,
+    marginTop: 24,
+  },
+  mode: { flex: 1, minHeight: 44, padding: 10, alignItems: 'center', justifyContent: 'center' },
+  modeActive: {
+    flex: 1,
+    minHeight: 44,
+    padding: 10,
+    alignItems: 'center',
+    borderRadius: 7,
+    backgroundColor: '#fff',
+  },
+  label: {
+    color: colors.muted,
+    fontSize: 10,
+    letterSpacing: 1.3,
+    fontWeight: '800',
+    marginTop: 22,
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 11,
+    padding: 14,
+    color: colors.ink,
+    backgroundColor: '#fff',
+    fontSize: 15,
+    marginTop: 8,
+  },
+  button: {
+    backgroundColor: colors.primary,
+    borderRadius: 11,
+    padding: 15,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  buttonText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  linkButton: { minHeight: 44, justifyContent: 'center' },
+  link: { color: colors.primary, fontSize: 12, fontWeight: '700', paddingVertical: 12 },
+  cooldown: { color: colors.muted, fontSize: 11, textAlign: 'right', marginTop: 5 },
+  message: { color: colors.muted, fontSize: 12, textAlign: 'center', marginTop: 13, minHeight: 16 },
+  error: { color: '#9B3F35', fontSize: 12, textAlign: 'center', marginTop: 13, minHeight: 16 },
+  home: { padding: 24 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 28,
+  },
+  homeTitle: { fontSize: 27, fontWeight: '800', color: colors.ink },
+  empty: {
+    alignItems: 'center',
+    padding: 30,
+    marginTop: 25,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
+    borderStyle: 'dashed',
+  },
+  emptyIcon: { fontSize: 28, color: colors.primary, marginBottom: 12 },
+  cardTitle: { fontSize: 14, fontWeight: '800', color: colors.ink, marginBottom: 5 },
+  danger: { color: '#9B3F35', fontSize: 12, fontWeight: '800', textAlign: 'center', marginTop: 28 },
+});

@@ -1,0 +1,1 @@
+export const RETRY_DELAYS_SECONDS = [60, 300, 900, 3600, 21600];

@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
 import { authenticate, getPublicClient } from '../../lib/server-auth';
-import { pageParams } from '../../lib/pagination';
+import { pageParams, paginationError } from '../../lib/pagination';
 
 export async function GET(request: Request) {
-  const { limit, cursor, query } = pageParams(request.url);
+  const pagination = pageParams(request.url);
+  if ('error' in pagination) return paginationError(pagination);
+  const { limit, cursor, query } = pagination;
   const params = new URL(request.url).searchParams;
   let builder = getPublicClient()
     .from('job_listings')
@@ -54,7 +56,9 @@ export async function POST(request: Request) {
         typeof body.salaryCurrency === 'string' ? body.salaryCurrency.toUpperCase() : 'GBP',
       location: typeof body.location === 'string' ? body.location : null,
       is_remote: body.isRemote === true,
-      workplace_type: ['remote', 'hybrid', 'on_site'].includes(String(body.workplaceType)) ? (body.workplaceType as 'remote' | 'hybrid' | 'on_site') : 'on_site',
+      workplace_type: ['remote', 'hybrid', 'on_site'].includes(String(body.workplaceType))
+        ? (body.workplaceType as 'remote' | 'hybrid' | 'on_site')
+        : 'on_site',
       application_deadline:
         typeof body.applicationDeadline === 'string' ? body.applicationDeadline : null,
       sponsorship_status:
